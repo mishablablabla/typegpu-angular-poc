@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "$id": "TypeGpuAngularNgAdd",
+  "title": "TypeGPU ng-add options",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The application to configure. Required when the workspace has several applications.",
+      "$default": { "$source": "projectName" }
+    }
+  },
+  "required": []
+}

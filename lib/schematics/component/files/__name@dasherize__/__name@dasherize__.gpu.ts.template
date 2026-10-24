@@ -1,0 +1,15 @@
+// Shader of <%= classifiedName %>. Modules named `*.gpu.ts` are transformed at build time (see the
+// shader plugin in angular.json), which is what makes the `'use gpu'` function below turn into WGSL.
+// Keep this file free of Angular decorators and Angular imports. For vectors use `std.*`
+// (`std.mul(a, b)`), not `a * b`; plain number maths (`Math.sin`, `*`, `+`) is fine.
+import tgpu, { d, std } from 'typegpu';
+
+/** `time` (seconds) and `tint` are uniforms owned by the component; `.$` reads them on the GPU. */
+export function sceneFragment(time: { $: number }, tint: { $: d.v3f }) {
+  return tgpu.fragmentFn({ in: { uv: d.vec2f }, out: d.vec4f })((input) => {
+    'use gpu';
+    const wave = 0.5 + 0.5 * Math.sin(input.uv.x * 6 + time.$ * 2);
+    const base = d.vec3f(input.uv.x, input.uv.y * wave, 0.35 + 0.35 * wave);
+    return d.vec4f(std.mul(base, tint.$), 1);
+  });
+}

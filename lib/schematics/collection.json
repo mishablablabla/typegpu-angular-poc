@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/@angular-devkit/schematics/collection-schema.json",
+  "schematics": {
+    "ng-add": {
+      "description": "Configures an Angular application for TypeGPU: shader build pipeline, dependencies and a CI check.",
+      "factory": "./ng-add/index#ngAdd",
+      "schema": "./ng-add/schema.json"
+    },
+    "component": {
+      "description": "Creates a standalone component with an animated TypeGPU canvas and a `*.gpu.ts` shader module.",
+      "factory": "./component/index#component",
+      "schema": "./component/schema.json",
+      "aliases": ["c"]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "$id": "TypeGpuAngularComponent",
+  "title": "TypeGPU component options",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The name of the component, e.g. `my-canvas`. It becomes the class, the selector and the file names.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What name would you like to use for the component?"
+    },
+    "project": {
+      "type": "string",
+      "description": "The application the component is added to. Required when the workspace has several applications and the command is not run inside one.",
+      "$default": { "$source": "projectName" }
+    },
+    "path": {
+      "type": "string",
+      "format": "path",
+      "description": "Where to create the component folder, relative to the workspace. Defaults to the application's `src/app`.",
+      "$default": { "$source": "workingDirectory" },
+      "visible": false
+    },
+    "skipTests": {
+      "type": "boolean",
+      "default": false,
+      "description": "Do not create the `.spec.ts` file."
+    }
+  },
+  "required": ["name"]
+}

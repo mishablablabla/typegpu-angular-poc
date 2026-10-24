@@ -1,0 +1,84 @@
+import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
+import { common, d } from 'typegpu';
+import { TgpuCanvas, TgpuReady, TypeGpu, injectFrame, injectRoot, injectUniform } from '<%= packageName %>';
+import { sceneFragment } from './<%= dasherize(name) %>.gpu';
+
+/** Hue in degrees to an RGB tint for the shader. */
+const tintOf = (hue: number) => d.vec3f(hue / 360, 1 - hue / 360, 0.6);
+
+/**
+ * The GPU part. It calls `injectRoot()`, so it only exists while the GPU is ready: <%= classifiedName %>
+ * puts it behind `*tgpuReady`. Its buffers are destroyed with it, and recreated if the device is lost
+ * and `TypeGpu.retry()` succeeds. (Exported because the Angular compiler requires components that others import
+ * to be exported, even from the same file; it is an implementation detail of <%= classifiedName %>.)
+ */
+@Component({
+  selector: '<%= selector %>-scene',
+  imports: [TgpuCanvas],
+  template: `<canvas tgpuCanvas></canvas>`,
+  // The canvas needs a CSS size: tgpuCanvas sizes its pixel buffer from it (in device pixels).
+  styles: `canvas { display: block; width: 100%; height: 240px; background: #111; }`,
+})
+export class <%= classifiedName %>Scene {
+  readonly hue = input.required<number>();
+
+  private readonly root = injectRoot();
+  private readonly canvas = viewChild.required(TgpuCanvas);
+
+  private readonly time = injectUniform(d.f32);
+  // Mirrors the `hue` signal: read once per frame, written to the GPU only when it changed.
+  private readonly tint = injectUniform(d.vec3f, { from: computed(() => tintOf(this.hue())) });
+
+  private readonly pipeline = this.root.createRenderPipeline({
+    vertex: common.fullScreenTriangle,
+    fragment: sceneFragment(this.time, this.tint),
+  });
+
+  constructor() {
+    // One shared animation loop for the whole app, running outside the Angular zone.
+    injectFrame(({ elapsedSeconds }) => {
+      const context = this.canvas().context();
+      if (!context) return; // not configured yet
+      this.time.write(elapsedSeconds);
+      this.pipeline.withColorAttachment({ view: context }).draw(3);
+    });
+  }
+}
+
+/** Drop `<<%= selector %> />` anywhere. Shows the scene, or a message while the GPU is not available. */
+@Component({
+  selector: '<%= selector %>',
+  imports: [<%= classifiedName %>Scene, TgpuReady],
+  template: `
+    <label>
+      Hue
+      <input #slider type="range" min="0" max="360" [value]="hue()" (input)="hue.set(slider.valueAsNumber)" />
+    </label>
+    <<%= selector %>-scene *tgpuReady="let root; else fallback" [hue]="hue()" />
+    <ng-template #fallback let-state>
+      @switch (state.status) {
+        @case ('unsupported') {
+          <p class="message">WebGPU is not available in this browser.</p>
+        }
+        @case ('failed') {
+          <p class="message">GPU initialisation failed. <button (click)="gpu.retry()">Retry</button></p>
+        }
+        @case ('lost') {
+          <p class="message">The GPU device was lost. <button (click)="gpu.retry()">Reconnect</button></p>
+        }
+        @default {
+          <div class="placeholder"></div>
+        }
+      }
+    </ng-template>
+  `,
+  styles: `
+    :host { display: block; }
+    .placeholder { height: 240px; background: #111; }
+  `,
+})
+export class <%= classifiedName %> {
+  protected readonly gpu = inject(TypeGpu);
+  /** Any signal can drive the shader; this one is set by the slider above. */
+  protected readonly hue = signal(210);
+}

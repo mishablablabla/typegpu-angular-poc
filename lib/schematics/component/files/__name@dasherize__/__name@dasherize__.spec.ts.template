@@ -1,0 +1,51 @@
+import { ErrorHandler } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { provideTypeGpu } from '<%= packageName %>';
+import { createFakeTypeGpu, installManualAnimationFrames } from '<%= packageName %>/testing';
+import { <%= classifiedName %> } from './<%= dasherize(name) %>';
+
+describe('<%= classifiedName %>', () => {
+  it('draws once the GPU is ready and releases its buffers when destroyed', async () => {
+    const fake = createFakeTypeGpu();
+    let draws = 0;
+    // The fake root has no pipelines: give it the one call the component makes. The shader itself is only
+    // compiled on a real GPU (see the browser check in the docs), not in unit tests.
+    Object.assign(fake.root, {
+      createRenderPipeline: () => ({ withColorAttachment: () => ({ draw: () => draws++ }) }),
+    });
+    const frames = installManualAnimationFrames();
+    try {
+      TestBed.configureTestingModule({ providers: [provideTypeGpu({ root: fake.root })] });
+      const fixture = TestBed.createComponent(<%= classifiedName %>);
+      fixture.detectChanges(); // zone-based test beds do not run change detection on their own
+      await fixture.whenStable();
+      fixture.detectChanges(); // second pass: the scene is created behind *tgpuReady
+      frames.flush();
+
+      expect(fixture.nativeElement.querySelector('canvas')).not.toBeNull();
+      expect(draws).toBe(1);
+      expect(fake.liveResources()).toBe(2); // time + tint
+
+      fixture.destroy();
+      expect(fake.liveResources()).toBe(0);
+    } finally {
+      frames.restore();
+    }
+  });
+
+  it('offers a retry when the GPU cannot be initialised', async () => {
+    // A failing factory behaves the same in jsdom and in a real browser, with or without WebGPU.
+    TestBed.configureTestingModule({
+      providers: [
+        provideTypeGpu({ createRoot: () => Promise.reject(new Error('no adapter')) }),
+        { provide: ErrorHandler, useValue: { handleError: () => undefined } },
+      ],
+    });
+    const fixture = TestBed.createComponent(<%= classifiedName %>);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('GPU initialisation failed');
+    expect(fixture.nativeElement.querySelector('button')?.textContent).toContain('Retry');
+  });
+});

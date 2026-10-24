@@ -1,0 +1,51 @@
+{
+  "name": "@typegpu-poc/angular",
+  "version": "0.0.1",
+  "description": "PoC: Angular-native integration for TypeGPU (not published)",
+  "license": "MIT",
+  "private": true,
+  "peerDependencies": {
+    "@angular/common": "^20.0.0 || ^21.0.0 || ^22.0.0",
+    "@angular/core": "^20.0.0 || ^21.0.0 || ^22.0.0",
+    "@babel/core": "^7.28.0",
+    "typegpu": "^0.12.8",
+    "unplugin-typegpu": "^0.12.6"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "ng-packagr -p ng-package.json -c tsconfig.lib.prod.json && npm run build:schematics",
+    "build:schematics": "tsc -p schematics/tsconfig.json && node scripts/copy-schematic-assets.mjs",
+    "test:schematics": "npm run build:schematics && vitest run",
+    "pack": "npm run build && cd dist && npm pack --pack-destination .."
+  },
+  "dependencies": {
+    "tslib": "^2.8.1"
+  },
+  "devDependencies": {
+    "@angular-devkit/core": "~22.2.4",
+    "@angular-devkit/schematics": "~22.2.4",
+    "@angular/common": "~22.2.0",
+    "@angular/compiler": "~22.2.0",
+    "@angular/compiler-cli": "~22.2.0",
+    "@angular/core": "~22.2.0",
+    "@schematics/angular": "~22.2.4",
+    "@types/node": "^26.6.5",
+    "ng-packagr": "^22.2.5",
+    "rxjs": "~7.8.0",
+    "typegpu": "0.12.8",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@babel/core": {
+      "optional": true
+    },
+    "unplugin-typegpu": {
+      "optional": true
+    }
+  },
+  "schematics": "./schematics/collection.json",
+  "ng-add": {
+    "save": "dependencies"
+  }
+}
