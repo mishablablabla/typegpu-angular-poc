@@ -3,10 +3,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error plain ES module without types
 import { checkShaders, watchShaders } from '../../../../tools/typegpu-shaders/index.mjs';
-import { BAD_SHADER, createProject, posix, SHADER, tsconfigWith, waitFor, type Project } from './project';
+import { BAD_SHADER, createProject, inPage, posix, SHADER, tsconfigWith, waitFor, type Project } from './project';
 
 type Result = { ok: boolean; diagnostics: { source: string; file?: string; text: string }[] };
 
@@ -72,10 +72,80 @@ describe('watch', () => {
     const stub = project.read('shaders-dist/wave.gpu.js');
     expect(stub).toContain('typegpu-shaders-error'); // the banner element
     expect(stub).toMatch(/src(\/|\\+)wave\.gpu\.ts/); // a JS string literal: the Windows separator is escaped
-    await expect(project.import('shaders-dist/wave.gpu.js')).rejects.toThrow(/TryStatement/); // nothing runs on stale output
+    // in a page: the banner, and nothing runs on stale output
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await inPage(async (page) => {
+        await expect(project.import('shaders-dist/wave.gpu.js')).rejects.toThrow(/TryStatement/);
+        expect(page.banner()).toMatch(/TypeGPU shader build failed[\s\S]*TryStatement/);
+      });
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('TryStatement'));
+    } finally {
+      logged.mockRestore();
+    }
     expect(project.read('shaders-dist/model.js')).toBe(goodModel);
     // and `check` agrees that this is not a usable build
     expect(checkShaders({ root: project.root }).problems.map((p: { code: string }) => p.code)).toContain('failed');
+  });
+
+  // An SSR dev server that has evaluated a module that throws on import never recovers when the module is fixed (Angular 20 and 21 serve 500
+  // for ever): on a server (no `document`) the stub must not throw, and must not leave the names it replaces undefined.
+  it('on a server (no document) the stub does not throw on import: it logs once, exports every name the shader exported, and throws only when one is used', async () => {
+    await start();
+    await nextBuild(() => project.write('src/wave.gpu.ts', BAD_SHADER));
+    expect(project.exists('shaders-dist/wave.gpu.js')).toBe(true);
+    expect((globalThis as { document?: unknown }).document).toBeUndefined();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const stub = await project.import('shaders-dist/wave.gpu.js');
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(String(logged.mock.calls[0][0])).toContain('TryStatement');
+      expect(Object.keys(stub).sort()).toEqual(['bad', 'touch', 'wave']); // what the real module exported
+      expect(typeof stub.wave).toBe('function');
+      expect(() => stub.wave(1)).toThrow(/cannot use "wave"[\s\S]*TryStatement/);
+      expect(() => stub.wave.$name).toThrow(/TryStatement/);
+      expect(() => new stub.bad()).toThrow(/TryStatement/);
+    } finally {
+      logged.mockRestore();
+    }
+    // recovery: the same module path is the real one again
+    await nextBuild(() => project.write('src/wave.gpu.ts', SHADER));
+    expect(project.read('shaders-dist/wave.gpu.js')).not.toContain('typegpu-shaders-error');
+  });
+
+  it('a stub still has the names of default, destructured, aliased and re-exported values, and skips type-only exports and invalid names', async () => {
+    project.write('src/wave.gpu.ts', [
+      `export const { a, b: [c] } = { a: 1, b: [2] };`,
+      `export function fn() {}`,
+      `export class K {}`,
+      `export enum E { X }`,
+      `const inner = 1; export { inner as renamed, type T };`,
+      `export type Alias = number; export interface I {}`,
+      `export * as ns from './model';`,
+      `export default function () {}`,
+      `export const broken = ((( ;`,
+    ].join('\n'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await start();
+      const stub = await project.import('shaders-dist/wave.gpu.js');
+      expect(Object.keys(stub).sort()).toEqual(['E', 'K', 'a', 'broken', 'c', 'default', 'fn', 'ns', 'renamed']);
+      expect(() => stub.default()).toThrow(/cannot use "default"/);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('a stub with no known exports (only `export *`) still loads on a server without throwing', async () => {
+    project.write('src/wave.gpu.ts', "export * from './model';\nexport const = ;\n");
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await start();
+      const stub = await project.import('shaders-dist/wave.gpu.js');
+      expect(Object.keys(stub)).toEqual([]); // `export *` cannot be resolved here: nothing to put in place
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('closing the watcher while a shader is still broken removes its stub, so a plain build after the session fails instead of bundling it', async () => {
@@ -104,7 +174,12 @@ describe('watch', () => {
     const result = await nextBuild(() => project.write('src/model.ts', 'export const SCALE = ;\n'));
     expect(result.ok).toBe(false);
     expect(posix(result.diagnostics.find((d) => d.source === 'syntax')!.file)).toBe('src/model.ts');
-    await expect(project.import('shaders-dist/model.js')).rejects.toThrow(/src[\\/]model.ts/);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await inPage(() => expect(project.import('shaders-dist/model.js')).rejects.toThrow(/src[\\/]model.ts/));
+    } finally {
+      logged.mockRestore();
+    }
     await nextBuild(() => project.write('src/model.ts', 'export const state = { count: 0 };\nexport const SCALE = 3;\n'));
     expect((await project.import('shaders-dist/model.js')).SCALE).toBe(3);
   });

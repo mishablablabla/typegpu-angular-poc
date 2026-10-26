@@ -75,3 +75,26 @@ export async function waitFor(condition: () => boolean, what: string, timeout = 
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
+
+/**
+ * Run `action` as if in a page: a minimal `document` exists meanwhile (restored afterwards). `banner()` is the text of the banner a stub
+ * put on the page, if any. A stub throws on import only when there is a `document`; without one (a server) it does not.
+ */
+export async function inPage<T>(action: (page: { banner(): string | undefined }) => Promise<T>) {
+  const g = globalThis as { document?: unknown };
+  const had = Object.prototype.hasOwnProperty.call(g, 'document');
+  const before = g.document;
+  const elements: { id?: string; textContent?: string }[] = [];
+  g.document = {
+    body: { appendChild: (el: { id?: string; textContent?: string }) => elements.push(el) },
+    getElementById: (id: string) => elements.find((el) => el.id === id) ?? null,
+    createElement: () => ({ style: {}, setAttribute() {} }),
+    addEventListener() {},
+  };
+  try {
+    return await action({ banner: () => elements[0]?.textContent });
+  } finally {
+    if (had) g.document = before;
+    else delete g.document;
+  }
+}
