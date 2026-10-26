@@ -234,6 +234,69 @@ describe('ng add --shaders prebuild: running it again', () => {
   });
 });
 
+describe('ng add --shaders prebuild: the extract-i18n target (it bundles the application itself, so it needs the shader step too)', () => {
+  const withExtract = async (builder = '@angular/build:extract-i18n', options: Record<string, unknown> = { buildTarget: 'app:build', format: 'xlf2' }) => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect['extract-i18n'] = { builder, options }));
+    return tree;
+  };
+
+  it('an existing stock extract-i18n target gets the wrapper and keeps its options', async () => {
+    const { tree, info } = await add(await withExtract());
+    expect(target(tree, 'app', 'extract-i18n')).toEqual({ builder: `${PKG}:extract-i18n`, options: { buildTarget: 'app:build', format: 'xlf2' } });
+    expect(info.join('\n')).toContain(`ng extract-i18n does too (builder ${PKG}:extract-i18n)`);
+  });
+
+  it('the legacy devkit name is accepted too', async () => {
+    const { tree } = await add(await withExtract('@angular-devkit/build-angular:extract-i18n', {}));
+    expect(target(tree, 'app', 'extract-i18n')).toEqual({ builder: `${PKG}:extract-i18n`, options: {} });
+  });
+
+  it('an absent extract-i18n target stays absent (nothing is added)', async () => {
+    const { tree, info } = await add(await workspaceWith());
+    expect(Object.keys(readJson(tree, 'angular.json').projects.app.architect).sort()).toEqual(['build', 'serve', 'test']);
+    expect(info.join('\n')).not.toContain('extract-i18n');
+  });
+
+  it('a project that already has the wrapper counts as prebuild-configured: running again changes nothing, byte for byte', async () => {
+    const first = (await add(await withExtract())).tree;
+    const snap = snapshot(first);
+    expect(first.readText('angular.json')).toContain(`${PKG}:extract-i18n`);
+    const second = (await add(first)).tree;
+    expect(snapshot(second)).toEqual(snap);
+    expect(snapshot((await add(second)).tree)).toEqual(snap);
+    // the plugin mode refuses it as it refuses the other wrappers (the build target is the wrapper too)
+    await expect(ours().runSchematic('ng-add', {}, second)).rejects.toThrow(/already set up for the shader prebuild/);
+  });
+
+  it('only the builder name changes: all of angular.json outside it is as it was', async () => {
+    const before = await withExtract();
+    const original = readJson(before, 'angular.json');
+    const changed = structuredClone(readJson((await add(before)).tree, 'angular.json'));
+    for (const name of ['build', 'serve', 'test', 'extract-i18n']) {
+      changed.projects.app.architect[name].builder = original.projects.app.architect[name].builder;
+    }
+    expect(changed).toEqual(original);
+  });
+
+  it('another extract-i18n builder is left alone, with a warning that says why (and the rest is still set up)', async () => {
+    const { tree, warnings } = await add(await withExtract('my-company:extract', {}));
+    expect(target(tree, 'app', 'extract-i18n').builder).toBe('my-company:extract');
+    expect(target(tree, 'app', 'build').builder).toBe(`${PKG}:application`);
+    expect(warnings.join('\n')).toMatch(/"extract-i18n" target of "app" uses "my-company:extract", which is left unchanged/);
+  });
+
+  it('in a workspace with several applications only the chosen project\'s target moves', async () => {
+    const tree = await workspaceWith(['app', 'other']);
+    editJson(tree, 'angular.json', (json) => {
+      for (const name of ['app', 'other']) json.projects[name].architect['extract-i18n'] = { builder: '@angular/build:extract-i18n' };
+    });
+    const { tree: after } = await add(tree, { project: 'other' });
+    expect(target(after, 'other', 'extract-i18n').builder).toBe(`${PKG}:extract-i18n`);
+    expect(target(after, 'app', 'extract-i18n').builder).toBe('@angular/build:extract-i18n');
+  });
+});
+
 describe('ng add --shaders prebuild: layouts', () => {
   it('an application in projects/<name>: the mapping, in the root tsconfig, points into the project folder', async () => {
     const { tree } = await add(await workspaceWith(['shop'], '22.0.0', false));

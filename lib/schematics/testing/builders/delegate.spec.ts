@@ -46,12 +46,12 @@ function installFakeAngularBuild(exportsToSkip: string[] = []) {
   for (const entry of readdirSync(lib)) if (entry !== '@angular' && !entry.startsWith('.')) symlinkSync(join(lib, entry), join(modules, entry));
   for (const entry of readdirSync(join(lib, '@angular'))) symlinkSync(join(lib, '@angular', entry), join(modules, '@angular', entry));
   const build = join(modules, '@angular', 'build');
-  for (const name of ['application', 'dev-server', 'unit-test', 'karma']) {
+  for (const name of ['application', 'dev-server', 'unit-test', 'karma', 'extract-i18n']) {
     mkdirSync(join(build, 'src', 'builders', name), { recursive: true });
     copyFileSync(join(FIXTURES, `${name}.schema.json`), join(build, 'src', 'builders', name, 'schema.json'));
   }
   writeFileSync(join(build, 'package.json'), JSON.stringify({ name: '@angular/build', version: '22.2.4', main: 'src/index.js' }));
-  const exported = { buildApplication: 'application', executeDevServerBuilder: 'dev-server', executeUnitTestBuilder: 'unit-test', executeKarmaBuilder: 'karma' } as Record<string, string>;
+  const exported = { buildApplication: 'application', executeDevServerBuilder: 'dev-server', executeUnitTestBuilder: 'unit-test', executeKarmaBuilder: 'karma', executeExtractI18nBuilder: 'extract-i18n' } as Record<string, string>;
   const lines = Object.entries(exported)
     .filter(([fn]) => !exportsToSkip.includes(fn))
     .map(([fn, name]) => `exports.${fn} = (options, context) => globalThis.__shape(globalThis.__stock('${name}', options, context));`);
@@ -80,15 +80,19 @@ function setup(wrapper: string, stock: string, stockSchemaName: string, projectM
   });
   host.addBuilder(stock, fake as Builder, 'fake official builder', JSON.parse(readFileSync(join(FIXTURES, `${stockSchemaName}.schema.json`), 'utf8')));
   host.addTarget({ project: 'app', target: 'build' }, `${OWN}:application`, { tsConfig: 'tsconfig.app.json' });
+  architect = newArchitect();
+}
+
+function newArchitect() {
   const registry = new schema.CoreSchemaRegistry();
   registry.addPostTransform(schema.transforms.addUndefinedDefaults); // what the CLI does for a third-party builder: every property without a value gets an empty one
-  architect = new Architect(host, registry);
+  return new Architect(host, registry);
 }
 
 async function run(target: string, options: Record<string, unknown> = {}) {
   const logger = new logging.Logger('test');
   logger.subscribe((entry) => logs.push({ level: entry.level, message: entry.message }));
-  host.addTarget({ project: 'app', target }, `${OWN}:${{ build: 'application', serve: 'dev-server', test: 'unit-test' }[target]}`, options as never);
+  host.addTarget({ project: 'app', target }, `${OWN}:${{ build: 'application', serve: 'dev-server', test: 'unit-test', 'extract-i18n': 'extract-i18n' }[target]}`, options as never);
   const scheduled = await architect.scheduleTarget({ project: 'app', target }, {}, { logger });
   // `result` is the FIRST output; `finished` settles when the run is over (the official builder ended or the run was stopped)
   const finished = new Promise<void>((resolve) => scheduled.output.subscribe({ complete: () => resolve(), error: () => resolve() }));
@@ -721,7 +725,7 @@ describe('test wrapper', () => {
 async function start(target: string, options: Record<string, unknown> = {}) {
   const logger = new logging.Logger('test');
   logger.subscribe((entry) => logs.push({ level: entry.level, message: entry.message }));
-  host.addTarget({ project: 'app', target }, `${OWN}:${{ build: 'application', serve: 'dev-server', test: 'unit-test' }[target]}`, options as never);
+  host.addTarget({ project: 'app', target }, `${OWN}:${{ build: 'application', serve: 'dev-server', test: 'unit-test', 'extract-i18n': 'extract-i18n' }[target]}`, options as never);
   return architect.scheduleTarget({ project: 'app', target }, {}, { logger });
 }
 
@@ -835,6 +839,187 @@ describe('lifecycle', () => {
       if (previous === undefined) delete process.env['NG_FORCE_TTY'];
       else process.env['NG_FORCE_TTY'] = previous;
     }
+  });
+});
+
+describe('extract-i18n wrapper: ng extract-i18n bundles the application itself, so the shaders must be current first', () => {
+  /** The official `executeExtractI18nBuilder` resolves with ONE result (a Promise), not an AsyncIterable: the stand-in does the same. */
+  const asPromise = async (outputs: AsyncIterable<unknown>) => {
+    for await (const output of outputs) return output;
+  };
+  const extract = (options: Record<string, unknown> = { buildTarget: 'app:build' }) => run('extract-i18n', options);
+  const setupExtract = () => {
+    setup('extract-i18n', '@angular/build:extract-i18n', 'extract-i18n');
+    (globalThis as any).__shape = asPromise;
+  };
+
+  it('from a clean checkout (no shader output) builds the shaders first: the official builder starts with the output in place and gets the same options', async () => {
+    setupExtract();
+    expect(project.exists('shaders-dist')).toBe(false);
+    const { result } = await extract({ buildTarget: 'app:build', format: 'json', outputPath: 'src/locale' });
+    expect(result.success).toBe(true);
+    expect(calls.map((c) => c.builder)).toEqual(['extract-i18n']);
+    expect(calls[0]).toMatchObject({ manifest: true, wave: true });
+    expect(calls[0]!.options).toMatchObject({ buildTarget: 'app:build', format: 'json', outputPath: 'src/locale' });
+  });
+
+  it('a stale shader output is rebuilt before extraction (the output the official builder sees is current, not the one a previous build left)', async () => {
+    let seen = '';
+    stockBehavior = async function* () {
+      seen = project.read('shaders-dist/wave.gpu.js');
+      yield { success: true };
+    };
+    setupExtract();
+    await extract();
+    expect(seen).toContain('std.sin(x)');
+    project.write('src/wave.gpu.ts', SHADER.replace('std.sin(x) * SCALE', 'std.cos(x) * SCALE'));
+    await extract();
+    expect(seen).toContain('std.cos(x)');
+    expect(seen).not.toContain('std.sin(x)');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('a shader that cannot be transformed fails the command with the same diagnostics as a build, and the official builder never runs (no "Extraction Complete" from a stale output)', async () => {
+    setupExtract();
+    await extract(); // a good output is on disk now: the broken source must still not be extracted from it
+    calls.length = 0;
+    logs.length = 0;
+    project.write('src/wave.gpu.ts', BAD_SHADER);
+    const { result } = await extract();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('the shader build failed');
+    expect(result.error).toContain('no messages were extracted');
+    expect(calls).toHaveLength(0);
+    const text = logs.map((l) => l.message).join('\n');
+    expect(posix(text)).toContain('src/wave.gpu.ts');
+    expect(text).toContain('TryStatement');
+  });
+
+  it('a relative import of a shader module fails it as for a build, and the official builder never runs', async () => {
+    project.write('src/app/stray.ts', `import { wave } from '../wave.gpu';\nexport const x = wave;\n`);
+    setupExtract();
+    const { result } = await extract();
+    expect(result.success).toBe(false);
+    expect(logs.map((l) => l.message).join('\n')).toContain("Import '@shaders/wave.gpu' instead");
+    expect(calls).toHaveLength(0);
+  });
+
+  it('the options are validated against the official schema and given its defaults, with no empty-array fillers', async () => {
+    setupExtract();
+    await extract();
+    expect(calls[0]!.options).toEqual({ buildTarget: 'app:build', format: 'xlf', progress: true });
+  });
+
+  it('an invalid option is rejected before anything runs, as for the official builder', async () => {
+    setupExtract();
+    await expect(extract({ buildTarget: 'app:build', format: 'docx' })).rejects.toThrow(/format|allowed values/i);
+    expect(calls).toHaveLength(0);
+    expect(project.exists('shaders-dist')).toBe(false);
+  });
+
+  it('an unknown option is rejected before anything runs, as for the official builder', async () => {
+    setupExtract();
+    await expect(extract({ buildTarget: 'app:build', notAnOption: 1 })).rejects.toThrow(/notAnOption|additional/i);
+    expect(calls).toHaveLength(0);
+    expect(project.exists('shaders-dist')).toBe(false);
+  });
+
+  it('a malformed buildTarget is rejected before anything runs', async () => {
+    setupExtract();
+    await expect(extract({ buildTarget: 'not a target' })).rejects.toThrow(/buildTarget|pattern/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a project without shader modules extracts as before and nothing is written', async () => {
+    project.remove('src/wave.gpu.ts');
+    project.write('src/app/main.ts', 'export const used = 1;\n');
+    setupExtract();
+    const { result } = await extract();
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(project.exists('shaders-dist')).toBe(false);
+  });
+
+  it('is never a watch: the shader build runs once and the run ends with the official builder', async () => {
+    setupExtract();
+    const { finished } = await extract();
+    await finished;
+    project.write('src/wave.gpu.ts', SHADER.replace('std.sin(x) * SCALE', 'std.cos(x) * SCALE'));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(project.read('shaders-dist/wave.gpu.js')).toContain('std.sin(x)'); // nothing rebuilt it
+  });
+
+  it('does not scan a bundle (it writes none): a missing output folder is not warned about', async () => {
+    setupExtract();
+    await extract();
+    expect(logs.filter((l) => l.level === 'warn')).toEqual([]);
+  });
+
+  it('passes the failure of the official builder on untouched', async () => {
+    stockBehavior = async function* () {
+      yield { success: false, error: 'Extraction Failed' };
+    };
+    setupExtract();
+    const { result } = await extract();
+    expect(result).toMatchObject({ success: false, error: 'Extraction Failed' });
+  });
+
+  it('the official builder gets the target of the project, and sees the build target as the stock application builder (it validates the build target\'s options itself)', async () => {
+    let seen: { target: unknown; name: string; options: Record<string, any> } | undefined;
+    stockBehavior = async function* (_options, context) {
+      const buildTarget = { project: 'app', target: 'build' };
+      const name = await context.getBuilderNameForTarget(buildTarget);
+      seen = { target: context.target, name, options: await context.validateOptions(await context.getTargetOptions(buildTarget), name) };
+      yield { success: true };
+    };
+    setupExtract();
+    await extract();
+    expect(seen!.target).toMatchObject({ project: 'app', target: 'extract-i18n' });
+    expect(seen!.name).toBe('@angular/build:application');
+    expect(seen!.options['conditions']).toBeUndefined(); // the CLI's empty-array filler of a third-party builder is not there
+  });
+
+  it('the shaders follow the build target the options name: its tsconfig (with its configuration), not a default', async () => {
+    // a tsconfig under which the project has a type error (an unused local): the result shows which tsconfig the shader build used
+    project.write('src/model.ts', 'export const state = { count: 0 };\nexport const SCALE = 3;\nconst unused = 1;\n');
+    project.write('tsconfig.alt.json', JSON.stringify({ extends: './tsconfig.app.json', compilerOptions: { noUnusedLocals: true } }));
+    setupExtract();
+    host.addTarget({ project: 'app', target: 'build', configuration: 'alt' }, `${OWN}:application`, { tsConfig: 'tsconfig.alt.json' });
+    const fine = await extract({ buildTarget: 'app:build' });
+    expect(fine.result.success).toBe(true);
+    project.remove('shaders-dist');
+    calls.length = 0;
+    architect = newArchitect(); // an Architect keeps the options of a target it has run: a new one for the other options
+    const alt = await extract({ buildTarget: 'app:build:alt' });
+    expect(alt.result.success).toBe(false);
+    expect(posix(logs.map((l) => l.message).join('\n'))).toMatch(/src\/model\.ts:3:\d+ - error/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('an application in projects/<name>: the shader output goes to the project folder', async () => {
+    const nested = createProject({
+      'projects/shop/src/model.ts': 'export const state = { count: 0 };\nexport const SCALE = 3;\n',
+      'projects/shop/src/wave.gpu.ts': SHADER,
+      'projects/shop/tsconfig.app.json': JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'preserve', moduleResolution: 'bundler', skipLibCheck: true, types: [] }, include: ['src/**/*.ts'] }),
+    });
+    project.dispose();
+    project = nested;
+    project.remove('src');
+    setup('extract-i18n', '@angular/build:extract-i18n', 'extract-i18n', { root: 'projects/shop', sourceRoot: 'projects/shop/src' });
+    (globalThis as any).__shape = asPromise;
+    host.addTarget({ project: 'app', target: 'build' }, `${OWN}:application`, { tsConfig: 'projects/shop/tsconfig.app.json' });
+    const { result } = await extract();
+    expect(result.success).toBe(true);
+    expect(project.exists('projects/shop/shaders-dist/wave.gpu.js')).toBe(true);
+    expect(project.exists('shaders-dist')).toBe(false);
+  });
+
+  it('falls back to Architect (scheduleBuilder) when the installed @angular/build does not export the function, and says so', async () => {
+    setup('extract-i18n', '@angular/build:extract-i18n', 'extract-i18n', { root: '', sourceRoot: 'src' }, ['executeExtractI18nBuilder']);
+    const { result } = await extract();
+    expect(result.success).toBe(true);
+    expect(calls.map((c) => c.builder)).toEqual(['scheduled:@angular/build:extract-i18n']);
+    expect(logs.filter((l) => l.level === 'warn').map((l) => l.message).join('\n')).toMatch(/does not export executeExtractI18nBuilder.*Architect/);
   });
 });
 

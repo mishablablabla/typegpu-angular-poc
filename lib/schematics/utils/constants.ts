@@ -24,6 +24,7 @@ export const BUILDERS = {
     build: '@angular/build:application',
     serve: '@angular/build:dev-server',
     test: '@angular/build:unit-test',
+    extractI18n: '@angular/build:extract-i18n',
   },
   custom: {
     build: `${CUSTOM_ESBUILD}:application`,
@@ -42,6 +43,7 @@ export const BUILDERS = {
 export const DEVKIT_ALIASES = {
   build: '@angular-devkit/build-angular:application',
   serve: '@angular-devkit/build-angular:dev-server',
+  extractI18n: '@angular-devkit/build-angular:extract-i18n',
 } as const;
 
 /**
@@ -81,6 +83,7 @@ export const WRAPPERS = {
   serve: `${PACKAGE_NAME}:dev-server`,
   unitTest: `${PACKAGE_NAME}:unit-test`,
   karma: `${PACKAGE_NAME}:karma`,
+  extractI18n: `${PACKAGE_NAME}:extract-i18n`,
 } as const;
 /** esbuild is a peer of the tool; this is the version it was run with (0.28.2). */
 export const ESBUILD_RANGE = '^0.28.2';

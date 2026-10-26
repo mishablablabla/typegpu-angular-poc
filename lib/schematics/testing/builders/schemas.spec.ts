@@ -15,7 +15,7 @@ const json = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
 const copy = (name: string) => json(join(BUILDERS, 'schemas', `${name}.json`));
 const official = (name: string, major: number) => json(join(FIXTURES, major === 22 ? `${name}.schema.json` : `${name}.${major}.schema.json`));
 const delegate = require(join(BUILDERS, 'delegate.cjs')) as { optionsFor: (options: Record<string, unknown>, raw: Record<string, unknown>) => Record<string, unknown> };
-const NAMES = ['application', 'dev-server', 'karma', 'unit-test'];
+const NAMES = ['application', 'dev-server', 'karma', 'unit-test', 'extract-i18n'];
 
 async function validate(schemaToUse: object, transform: unknown, options: unknown) {
   const registry = new schema.CoreSchemaRegistry();

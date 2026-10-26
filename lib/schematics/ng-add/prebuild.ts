@@ -31,9 +31,11 @@ import type { NgAddOptions } from './schema';
  * `ng add --shaders prebuild`: the project's `'use gpu'` shaders are built by the `typegpu-shaders` tool BEFORE Angular builds, and
  * this is enforced by the builders themselves: the build, serve and test targets of angular.json move to this package's wrapper
  * builders (builders.json), which build the shaders and then run the official builder. So `ng build`, `ng serve` and `ng test`
- * (from a script, an IDE or CI) can never bundle shaders older than their sources, and no npm script has to be rewritten.
+ * (from a script, an IDE or CI) can never bundle shaders older than their sources, and no npm script has to be rewritten. The same holds
+ * for `ng extract-i18n` when the project has that target (it bundles the application itself, without the build target's builder);
+ * an absent target stays absent.
  *
- * Changes: angular.json (the builder names of three targets; their options are kept), package.json (dependencies only), the
+ * Changes: angular.json (the builder names of up to four targets; their options are kept), package.json (dependencies only), the
  * tsconfig that holds the compiler options (a `paths` entry), .gitignore. Idempotent. Every check runs before any file is
  * touched: an unsupported or ambiguous layout is refused with what to change.
  */
@@ -224,6 +226,10 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
         `Use "${BUILDERS.stock.serve}" (or "${DEVKIT_ALIASES.serve}") and run the schematic again.`,
       );
     }
+    // `extract-i18n` is optional (new applications have none). A stock one moves to the wrapper; another builder is left as it is, with a note
+    const extractI18n = project.targets.get('extract-i18n');
+    const extractI18nBuilders: string[] = [BUILDERS.stock.extractI18n, DEVKIT_ALIASES.extractI18n, WRAPPERS.extractI18n];
+    const wrapExtractI18n = !!extractI18n && extractI18nBuilders.includes(extractI18n.builder);
     const { build: buildTsConfig, others } = tsconfigsOf(project);
     if (!buildTsConfig) throw refuse(`The build target of "${projectName}" has no "tsConfig" option.`, 'Set it and run the schematic again.');
 
@@ -252,6 +258,12 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
     const tsconfigEdits = planTsconfig(tree, projectName, out, buildTsConfig, others, otherApplications);
 
     const notes: string[] = [];
+    if (extractI18n && !wrapExtractI18n) {
+      notes.push(
+        `The "extract-i18n" target of "${projectName}" uses "${extractI18n.builder}", which is left unchanged: ` +
+          `it does not build the shaders first, so extraction fails without a shader output on disk and uses a stale one otherwise. Use "${BUILDERS.stock.extractI18n}" and run the schematic again.`,
+      );
+    }
     const test = project.targets.get('test');
     let testBuilder: string | undefined;
     if (test) {
@@ -274,6 +286,8 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
       if (serveTarget) serveTarget.builder = WRAPPERS.serve;
       const testTarget = target.targets.get('test');
       if (testTarget && testBuilder) testTarget.builder = testBuilder;
+      const extractTarget = target.targets.get('extract-i18n');
+      if (extractTarget && wrapExtractI18n) extractTarget.builder = WRAPPERS.extractI18n;
     });
 
     const dependencies: Rule[] = [];
@@ -311,6 +325,7 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
         notes.forEach((line) => ctx.logger.warn(line));
         ctx.logger.info(
           `TypeGPU shader prebuild is set up for "${projectName}": ng build, ng serve and ng test now build the shaders first (builders ${WRAPPERS.build}, ${WRAPPERS.serve}, ${testBuilder ?? 'the test builder was left as it is'}). ` +
+            (wrapExtractI18n ? `ng extract-i18n does too (builder ${WRAPPERS.extractI18n}). ` : '') +
             `Shaders are the "*.gpu.ts" files under the project's source root, imported from application code as "@shaders/<path under the source root>" (not by a relative path: the build refuses those; "typegpu-shaders check --fix-imports" rewrites existing imports). ` +
             `Until the first shader exists the builds run as before.`,
         );
