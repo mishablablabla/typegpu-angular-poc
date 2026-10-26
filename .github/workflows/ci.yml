@@ -1,5 +1,6 @@
 name: CI
 
+# pull_request (not pull_request_target): fork PRs run with a read-only token and no secrets. Nothing here needs more.
 on:
   pull_request:
   push:
@@ -10,36 +11,48 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # never cancel a run on main: the last green commit stays identifiable
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  NODE_VERSION: 24.21.0
   NG_CLI_ANALYTICS: 'false'
+  # 24: what the repo develops on (Angular 22 needs ^22.22.3 || ^24.15 || >=26). 22.22.3: the oldest Node Angular 22 accepts.
+  NODE_CURRENT: '24'
+  NODE_MIN: '22.22.3'
 
 defaults:
   run:
-    shell: bash
+    shell: bash # `bash -eo pipefail`: a failing command on the left of a pipe fails the step; Git Bash on Windows
 
 jobs:
   lib:
-    name: lib (${{ matrix.os }})
+    name: lib (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - { os: ubuntu-latest, node: '24' }
+          - { os: windows-latest, node: '24' }
+          - { os: ubuntu-latest, node: '22.22.3' }
     defaults:
       run:
         shell: bash
         working-directory: lib
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # SHAs verified with `gh api repos/actions/<name>/git/ref/tags/<tag>` (actions/checkout v7.0.1, actions/setup-node v7.1.0)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: ${{ env.NODE_VERSION }}
-      - run: npm ci
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: lib/package-lock.json
+      - run: node --version && npm --version
+      - run: npm ci --ignore-scripts
       - name: Typecheck schematics
         run: npx tsc -p schematics/tsconfig.json --noEmit
       - name: Typecheck library
@@ -47,43 +60,118 @@ jobs:
       - name: Tests
         run: npm run test:schematics
 
-  app:
-    name: app (ubuntu-latest)
+  # Packs the library ONCE, on Linux. Every app job installs this exact file: the tarball is not byte-identical when packed on Windows
+  # (no exec bit on bin files), and it never needs to be: nothing pins its hash in a lockfile.
+  pack:
+    name: pack
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Install lib dependencies
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_CURRENT }}
+          cache: npm
+          cache-dependency-path: lib/package-lock.json
+      - run: npm ci --ignore-scripts
         working-directory: lib
-        run: npm ci
-      - name: Pack the library
-        working-directory: lib
+      - name: Pack (ng-packagr + schematics, then npm pack)
         run: npm run pack
-      # app/package-lock.json records the integrity of a tarball packed on a developer machine;
-      # a tarball packed here can never match it, so drop that one hash and keep the rest pinned.
-      - name: Drop the lockfile hash of the local tarball
-        working-directory: app
+        working-directory: lib
+      - name: Verify the tarball contract
         run: |
-          node -e '
-            const fs = require("fs");
-            const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
-            const entry = lock.packages["node_modules/@typegpu-poc/angular"];
-            if (!entry || !String(entry.resolved).startsWith("file:")) throw new Error("local tarball entry not found in app/package-lock.json");
-            delete entry.integrity;
-            fs.writeFileSync("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
-          '
-      - name: Install app dependencies (with the packed library)
+          node scripts/verify-package.mjs lib/typegpu-poc-angular-*.tgz --print-integrity > lib/integrity.txt
+          { echo '### Packed library'; echo '```'; cat lib/integrity.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lib-tarball
+          path: |
+            lib/typegpu-poc-angular-*.tgz
+            lib/integrity.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  app:
+    name: app (${{ matrix.os }}, node ${{ matrix.node }})
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: '24' }
+          - { os: windows-latest, node: '24' }
+          - { os: ubuntu-latest, node: '22.22.3' }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lib-tarball
+          path: lib
+      - name: The tarball is the one that was packed and verified
+        run: |
+          test "$(node scripts/verify-package.mjs lib/typegpu-poc-angular-*.tgz --print-integrity 2>/dev/null)" = "$(cat lib/integrity.txt)"
+          node scripts/verify-package.mjs lib/typegpu-poc-angular-*.tgz
+      # The lockfile pins every third-party package and says nothing about the library under test, so there is nothing machine-specific in it
+      # to bypass. The library is added afterwards from the verified tarball; npm still checks its peer ranges against the locked tree.
+      - name: Install app dependencies (lockfile, no changes allowed)
         working-directory: app
-        run: npm ci
-      - name: Check that the installed library is the packed one
+        run: npm ci --ignore-scripts
+      - name: Install the packed library
         working-directory: app
-        run: test -f node_modules/@typegpu-poc/angular/builders.json
+        run: npm install --no-save --ignore-scripts ../lib/typegpu-poc-angular-*.tgz
+      - name: Installed package is byte-identical to the tarball
+        working-directory: app
+        run: node ../scripts/verify-package.mjs ../lib/typegpu-poc-angular-*.tgz --installed node_modules/@typegpu-poc/angular
       - name: Tests
         working-directory: app
         run: npx ng test --watch=false
-      - name: Build
+      - name: Build (production)
         working-directory: app
         run: npx ng build
+      - name: Shader bundle check (the CLI the package ships)
+        working-directory: app
+        run: npx typegpu-check-bundle dist/app/browser
+      - name: Nothing tracked was modified by the job
+        run: git diff --exit-code -- app/package.json app/package-lock.json lib/package.json lib/package-lock.json
+
+  # Real Angular CLI 20/21/22 consumers (ng new, ng add, generate, build, test, bundle check) from the same tarball. Needs the network.
+  acceptance:
+    name: acceptance (Angular ${{ matrix.angular }})
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { angular: '20', node: '22.22.3' }
+          - { angular: '21', node: '22.22.3' }
+          - { angular: '22', node: '24' }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lib-tarball
+          path: lib
+      - name: Acceptance run against the packed tarball
+        env:
+          ANGULAR_CLI: ${{ matrix.angular }}
+        run: |
+          PKG_TGZ="$(ls "$PWD"/lib/typegpu-poc-angular-*.tgz)" ./scripts/acceptance-clean-consumer.sh

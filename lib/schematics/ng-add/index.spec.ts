@@ -123,6 +123,19 @@ describe('ng add: existing configuration', () => {
     expect(readJson(await ngAdd(tree), 'package.json').scripts['check:shaders']).toBe('echo mine');
   });
 
+  it.each([['dist/a b'], ['dist/a;touch pwned'], ['dist/$(id)'], ['dist/`id`'], ['dist/a&b'], ['dist/a|b']])(
+    'does not put an output folder that is not a plain word (%s) into an npm script: no script is added, the rest of ng add is done',
+    async (outputPath) => {
+      const tree = await workspaceWith();
+      editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.options.outputPath = outputPath));
+      const result = await ngAdd(tree);
+      const pkg = readJson(result, 'package.json');
+      expect(pkg.scripts['check:shaders']).toBeUndefined();
+      expect(pkg.dependencies['typegpu']).toBeDefined(); // the setup itself went through
+      expect(JSON.stringify(readJson(result, 'angular.json'))).toContain('custom-esbuild');
+    },
+  );
+
   it('uses the custom-esbuild major of the application\'s Angular major', async () => {
     const tree = await workspaceWith();
     editJson(tree, 'package.json', (pkg) => (pkg.dependencies['@angular/core'] = '^21.2.0'));

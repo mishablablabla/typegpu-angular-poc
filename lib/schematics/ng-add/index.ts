@@ -121,6 +121,14 @@ export function ngAdd(options: NgAddOptions): Rule {
       }
       const build = project.targets.get('build');
       const production = build?.configurations?.['production'] !== undefined;
+      // The script is run by npm through the shell of the user's platform: only values that are plain words are put in it unquoted (a space
+      // would split it, `;` `&` `$(...)` in a value of a hostile angular.json would be run). Anything else: the user writes the script.
+      const words = [projectName, tools.check, ...outputDirectories(project, projectName)];
+      const unsafe = words.filter((word) => !/^[\w@.\/-]+$/.test(word));
+      if (unsafe.length > 0) {
+        ctx.logger.warn(`The "${name}" script was not added: ${unsafe.map((word) => JSON.stringify(word)).join(', ')} cannot be put in an npm script without quoting. Add it yourself: build the project, then run node ${JSON.stringify(tools.check)} on its output folders.`);
+        return;
+      }
       manifest.scripts = {
         ...manifest.scripts,
         [name]:

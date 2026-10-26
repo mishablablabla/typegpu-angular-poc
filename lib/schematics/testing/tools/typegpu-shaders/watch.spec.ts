@@ -237,7 +237,8 @@ describe('watch: closing', () => {
   });
 
   // Windows cannot deliver SIGINT to a child process: `kill('SIGINT')` ends it at once, without running its handlers (a Ctrl-C typed in a
-  // console does run them). Not testable there with a spawned child; see QA_FINDINGS.md (W2).
+  // console does run them; see QA_FINDINGS.md W2). This test needs a real signal, so it runs where there are POSIX signals; the one below
+  // makes the child run the very same handlers by emitting the event itself, which works everywhere.
   it.skipIf(process.platform === 'win32')('removes the stub on Ctrl-C (SIGINT), and the process still ends by the signal', async () => {
     project.write('src/wave.gpu.ts', BAD_SHADER);
     const tool = pathToFileURL(join(__dirname, '../../../../tools/typegpu-shaders/index.mjs')).href;
@@ -250,6 +251,35 @@ describe('watch: closing', () => {
     child.kill('SIGINT');
     expect(await ended).toBe('SIGINT');
     expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false);
+  });
+
+  // What is and is not shown here: the child's handler for the signal (registered by the watcher) runs, removes the stub and ends the
+  // process, on every platform. NOT shown: that the operating system turns a console Ctrl-C / Ctrl-Break / closed console into
+  // SIGINT / SIGBREAK / SIGHUP for a Node process (Node's own contract; it needs a console, which a test process does not have).
+  it.each(process.platform === 'win32' ? ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] : ['SIGINT', 'SIGTERM', 'SIGHUP'])('removes the stub when the process is told %s, and still ends (handler run by the child itself)', async (signal) => {
+    project.write('src/wave.gpu.ts', BAD_SHADER);
+    const tool = pathToFileURL(join(__dirname, '../../../../tools/typegpu-shaders/index.mjs')).href;
+    const script = [
+      `import { watchShaders } from ${JSON.stringify(tool)};`,
+      `const w = watchShaders({ root: ${JSON.stringify(project.root)} });`,
+      'await w.ready;',
+      `process.stdin.once('data', () => process.emit(${JSON.stringify(signal)}, ${JSON.stringify(signal)}));`, // what the platform does for a real signal
+      "console.log('stub written');",
+      'setInterval(() => {}, 1000);',
+    ].join('\n');
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['pipe', 'pipe', 'inherit'] });
+    let printed = '';
+    child.stdout.on('data', (chunk) => (printed += chunk));
+    await waitFor(() => printed.includes('stub written'), 'the watcher in the child process');
+    expect(project.exists('shaders-dist/wave.gpu.js')).toBe(true);
+    const ended = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.on('exit', (code, by) => resolve({ code, signal: by })));
+    child.stdin.write('go\n');
+    const result = await ended;
+    expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false);
+    // POSIX: the process ends by the signal itself (its default action, after the clean-up). Windows: `process.kill` ends it with code 1 for
+    // SIGINT/SIGTERM, and the handler falls back to 128 + n where the signal is not supported (HYPOTHESIS until run on windows-latest).
+    if (process.platform !== 'win32') expect(result.signal).toBe(signal);
+    else expect(result.code).not.toBe(0);
   });
 });
 

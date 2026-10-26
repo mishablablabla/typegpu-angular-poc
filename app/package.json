@@ -17,7 +17,6 @@
     "@angular/forms": "^22.2.0",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
-    "@typegpu-poc/angular": "file:../lib/typegpu-poc-angular-0.0.1.tgz",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "typegpu": "^0.12.8"

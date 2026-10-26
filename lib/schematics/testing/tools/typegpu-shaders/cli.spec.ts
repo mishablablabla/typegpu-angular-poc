@@ -15,7 +15,7 @@ const run = (args: string[], timeout = 60_000) => {
   const result = spawnSync(process.execPath, [CLI, ...args], { cwd: project.root, encoding: 'utf8', timeout });
   return { code: result.status, out: result.stdout, err: result.stderr };
 };
-// The command goes through `cmd.exe` on Windows, which does not understand the quoting of an inline `node -e '...'`: run a script file.
+// A script file rather than an inline `node -e '...'`: the same on every platform, whatever the shell would make of the quoting.
 let scripts = 0;
 const JS = (code: string) => {
   const file = `probe-${++scripts}.cjs`;
@@ -119,7 +119,7 @@ describe('run: the build always comes first', () => {
     const result = run(['run', '--', 'qa-probe']);
     expect(result.code).toBe(7);
     expect(project.read('probe-ran.txt')).toContain('ran');
-    expect(run(['run', '--', 'definitely-not-a-command']).code).toBe(process.platform === 'win32' ? 1 : 127); // cmd.exe reports 1
+    expect(run(['run', '--', 'definitely-not-a-command']).code).toBe(127); // on Windows too: the tool looks the command up itself
   });
 });
 

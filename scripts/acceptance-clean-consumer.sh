@@ -20,6 +20,11 @@ pm="${PM:-npm}"            # npm (default) or pnpm; the CLI picks the same manag
 pkg_name="@typegpu-poc/angular"
 step() { printf '\n=== %s\n' "$*"; }
 
+# `rm -rf` below: only ever a folder under acceptance/ of this checkout, or one the caller names with ACCEPTANCE_FORCE=1
+case "$work" in
+  "$root"/acceptance/*) ;;
+  *) [ -n "${ACCEPTANCE_FORCE:-}" ] || { echo "refusing to delete $work: it is not under $root/acceptance/ (set ACCEPTANCE_FORCE=1 to allow it)" >&2; exit 1; } ;;
+esac
 rm -rf "$work" && mkdir -p "$work"
 if [ -n "${PKG_TGZ:-}" ]; then
   step "use the given tarball $PKG_TGZ (nothing is built)"
