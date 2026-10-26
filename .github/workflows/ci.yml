@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 24.21.0
+  NG_CLI_ANALYTICS: 'false'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lib:
+    name: lib (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+        working-directory: lib
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - name: Typecheck schematics
+        run: npx tsc -p schematics/tsconfig.json --noEmit
+      - name: Typecheck library
+        run: npx tsc -p tsconfig.lib.json --noEmit
+      - name: Tests
+        run: npm run test:schematics
+
+  app:
+    name: app (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install lib dependencies
+        working-directory: lib
+        run: npm ci
+      - name: Pack the library
+        working-directory: lib
+        run: npm run pack
+      # app/package-lock.json records the integrity of a tarball packed on a developer machine;
+      # a tarball packed here can never match it, so drop that one hash and keep the rest pinned.
+      - name: Drop the lockfile hash of the local tarball
+        working-directory: app
+        run: |
+          node -e '
+            const fs = require("fs");
+            const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+            const entry = lock.packages["node_modules/@typegpu-poc/angular"];
+            if (!entry || !String(entry.resolved).startsWith("file:")) throw new Error("local tarball entry not found in app/package-lock.json");
+            delete entry.integrity;
+            fs.writeFileSync("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
+          '
+      - name: Install app dependencies (with the packed library)
+        working-directory: app
+        run: npm ci
+      - name: Check that the installed library is the packed one
+        working-directory: app
+        run: test -f node_modules/@typegpu-poc/angular/builders.json
+      - name: Tests
+        working-directory: app
+        run: npx ng test --watch=false
+      - name: Build
+        working-directory: app
+        run: npx ng build
