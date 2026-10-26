@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // CHECK_SHADER_BUNDLE_TOOL lets a run point at another copy of the tool (e.g. an older one, to prove the tests catch the old bugs).
+const posix = (text: string) => text.replaceAll('\\', '/');
 const TOOL = process.env['CHECK_SHADER_BUNDLE_TOOL'] ?? join(__dirname, '..', '..', '..', 'tools', 'check-shader-bundle.mjs');
 const FIXTURES = join(__dirname, '..', 'fixtures');
 const TRANSFORMED = "e.f=function(r){'use gpu';return r};\n";
@@ -50,7 +51,7 @@ describe('check-shader-bundle: usage and directories', () => {
     const r = run('dist/app/browser');
     expect(r.code).toBe(2);
     expect(r.err.trim().split('\n')).toHaveLength(1);
-    expect(r.err).toMatch(/directory not found: .*dist\/app\/browser.*run the build first/);
+    expect(posix(r.err)).toMatch(/directory not found: .*dist\/app\/browser.*run the build first/);
     expect(r.err).not.toMatch(/ENOENT|at /);
   });
 
@@ -108,7 +109,7 @@ describe('check-shader-bundle: what it scans', () => {
       put(path, UNTRANSFORMED);
       const bad = run('dist');
       expect(bad.code, path).toBe(1);
-      expect(bad.err, path).toContain(name);
+      expect(posix(bad.err), path).toContain(name);
       put(path, TRANSFORMED);
     }
   });
@@ -151,14 +152,14 @@ describe('check-shader-bundle: what it counts', () => {
     const r = run('out');
     expect(r.code).toBe(1);
     expect(r.err).toMatch(/1 of 1 'use gpu' directive\(s\) were not transformed/);
-    expect(r.err).toMatch(/out\/main\.js:2 /);
+    expect(posix(r.err)).toMatch(/out\/main\.js:2 /);
   });
 
   it('names Web Workers when the offending file is a worker bundle, and lists them as a possible cause otherwise', () => {
     put('out/worker-ABC123.js', UNTRANSFORMED);
     const worker = run('out');
     expect(worker.code).toBe(1);
-    expect(worker.err).toMatch(/Web Workers are not supported.*out\/worker-ABC123\.js/);
+    expect(posix(worker.err)).toMatch(/Web Workers are not supported.*out\/worker-ABC123\.js/);
 
     rmSync(join(dir, 'out'), { recursive: true });
     put('out/main.js', UNTRANSFORMED);

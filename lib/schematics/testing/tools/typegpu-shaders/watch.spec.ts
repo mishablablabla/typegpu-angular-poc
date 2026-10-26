@@ -6,7 +6,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain ES module without types
 import { checkShaders, watchShaders } from '../../../../tools/typegpu-shaders/index.mjs';
-import { BAD_SHADER, createProject, SHADER, waitFor, type Project } from './project';
+import { BAD_SHADER, createProject, posix, SHADER, waitFor, type Project } from './project';
 
 type Result = { ok: boolean; diagnostics: { source: string; file?: string; text: string }[] };
 
@@ -67,7 +67,8 @@ describe('watch', () => {
     const goodModel = project.read('shaders-dist/model.js');
     const result = await nextBuild(() => project.write('src/wave.gpu.ts', BAD_SHADER));
     expect(result.ok).toBe(false);
-    expect(result.diagnostics[0]).toMatchObject({ file: 'src/wave.gpu.ts', text: expect.stringContaining('TryStatement') });
+    expect(result.diagnostics[0]).toMatchObject({ text: expect.stringContaining('TryStatement') });
+    expect(posix(result.diagnostics[0].file)).toBe('src/wave.gpu.ts');
     const stub = project.read('shaders-dist/wave.gpu.js');
     expect(stub).toContain('typegpu-shaders-error'); // the banner element
     expect(stub).toContain('src/wave.gpu.ts');
@@ -102,8 +103,8 @@ describe('watch', () => {
     await start();
     const result = await nextBuild(() => project.write('src/model.ts', 'export const SCALE = ;\n'));
     expect(result.ok).toBe(false);
-    expect(result.diagnostics.find((d) => d.source === 'syntax')).toMatchObject({ file: 'src/model.ts' });
-    await expect(project.import('shaders-dist/model.js')).rejects.toThrow(/src\/model.ts/);
+    expect(posix(result.diagnostics.find((d) => d.source === 'syntax')!.file)).toBe('src/model.ts');
+    await expect(project.import('shaders-dist/model.js')).rejects.toThrow(/src[\\/]model.ts/);
     await nextBuild(() => project.write('src/model.ts', 'export const state = { count: 0 };\nexport const SCALE = 3;\n'));
     expect((await project.import('shaders-dist/model.js')).SCALE).toBe(3);
   });
@@ -192,7 +193,7 @@ describe('watch: a shader module imported by a relative path (the dev server wou
     watcher = watchShaders({ root: project.root }, { onBuild: (result: Result) => results.push(result), onImports: (problems: { file: string; text: string }[]) => imports.push(problems) });
     await watcher.ready;
     expect(imports).toHaveLength(1);
-    expect(imports[0]![0]).toMatchObject({ file: 'src/app/early.ts' });
+    expect(posix(imports[0]![0]!.file)).toBe('src/app/early.ts');
     expect(imports[0]![0]!.text).toContain("Import '@shaders/wave.gpu' instead");
 
     // an `@shaders/...` import that matches nothing is not reported here: Angular itself fails to resolve it, with its own message
@@ -235,7 +236,9 @@ describe('watch: closing', () => {
     expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false);
   });
 
-  it('removes the stub on Ctrl-C (SIGINT), and the process still ends by the signal', async () => {
+  // Windows cannot deliver SIGINT to a child process: `kill('SIGINT')` ends it at once, without running its handlers (a Ctrl-C typed in a
+  // console does run them). Not testable there with a spawned child; see QA_FINDINGS.md (W2).
+  it.skipIf(process.platform === 'win32')('removes the stub on Ctrl-C (SIGINT), and the process still ends by the signal', async () => {
     project.write('src/wave.gpu.ts', BAD_SHADER);
     const tool = pathToFileURL(join(__dirname, '../../../../tools/typegpu-shaders/index.mjs')).href;
     const script = `import { watchShaders } from ${JSON.stringify(tool)};\nconst w = watchShaders({ root: ${JSON.stringify(project.root)} });\nawait w.ready;\nconsole.log('stub written');\nsetInterval(() => {}, 1000);`;

@@ -6,7 +6,7 @@ import { logging, schema } from '@angular-devkit/core';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BAD_SHADER, createProject, SHADER, waitFor, type Project } from '../tools/typegpu-shaders/project';
+import { BAD_SHADER, createProject, posix, SHADER, waitFor, type Project } from '../tools/typegpu-shaders/project';
 
 const BUILDERS = join(__dirname, '..', '..', '..', 'builders');
 const FIXTURES = join(__dirname, '..', 'fixtures', 'angular-build');
@@ -149,7 +149,7 @@ describe('application wrapper: the shaders are current before the official build
     expect(result.error).toContain('the shader build failed');
     expect(calls).toHaveLength(0);
     const text = logs.map((l) => l.message).join('\n');
-    expect(text).toContain('src/wave.gpu.ts');
+    expect(posix(text)).toContain('src/wave.gpu.ts');
     expect(text).toContain('TryStatement');
     expect(text).toMatch(/directives at line/);
   });
@@ -159,7 +159,7 @@ describe('application wrapper: the shaders are current before the official build
     setup('application', '@angular/build:application', 'application');
     const { result } = await run('build', { tsConfig: 'tsconfig.app.json' });
     expect(result.success).toBe(false);
-    expect(logs.map((l) => l.message).join('\n')).toMatch(/src\/model\.ts:2:\d+ - error/);
+    expect(posix(logs.map((l) => l.message).join('\n'))).toMatch(/src\/model\.ts:2:\d+ - error/);
     expect(calls).toHaveLength(0);
   });
 

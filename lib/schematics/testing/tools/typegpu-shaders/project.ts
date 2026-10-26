@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+// The tool reports paths relative to the project the way the platform writes them ('src\\wave.gpu.ts' on Windows); the tests compare them as POSIX.
+export const posix = (text: string) => text.replaceAll('\\', '/');
+
 export const CLI = join(__dirname, '../../../../tools/typegpu-shaders/cli.mjs');
 const NODE_MODULES = join(__dirname, '../../../../node_modules');
 

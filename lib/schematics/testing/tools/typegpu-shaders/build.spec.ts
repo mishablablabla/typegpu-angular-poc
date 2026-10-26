@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping';
 // @ts-expect-error plain ES module without types
 import { buildShaders, checkShaders } from '../../../../tools/typegpu-shaders/index.mjs';
-import { BAD_SHADER, createProject, SHADER, type Project } from './project';
+import { BAD_SHADER, createProject, posix, SHADER, type Project } from './project';
 
 type Diagnostic = { source: string; file?: string; line?: number; column?: number; text: string; notes?: string[] };
 type Result = { ok: boolean; status: string; files: string[]; diagnostics: Diagnostic[] };
@@ -26,7 +26,9 @@ describe('a successful build', () => {
     for (const name of ['wave.gpu', 'model']) {
       for (const ext of ['js', 'js.map', 'd.ts', 'd.ts.map']) expect(project.exists(`shaders-dist/${name}.${ext}`), `${name}.${ext}`).toBe(true);
     }
-    expect(JSON.parse(project.read('shaders-dist/.manifest.json'))).toMatchObject({ status: 'ok', files: ['src/model.ts', 'src/wave.gpu.ts'] });
+    const manifest = JSON.parse(project.read('shaders-dist/.manifest.json'));
+    expect(manifest).toMatchObject({ status: 'ok' });
+    expect(manifest.files.map(posix)).toEqual(['src/model.ts', 'src/wave.gpu.ts']);
   });
 
   it('transforms the shader: metadata is written, and the module resolves to WGSL', async () => {
@@ -93,7 +95,7 @@ describe('errors are specific and a failed build cannot be mistaken for a good o
       const result = await build(project);
       expect(result.ok).toBe(false);
       const diagnostic = result.diagnostics.find((d) => d.source === 'transform')!;
-      expect(diagnostic.file).toBe('src/wave.gpu.ts');
+      expect(posix(diagnostic.file!)).toBe('src/wave.gpu.ts');
       expect(diagnostic.text).toContain('TryStatement');
       expect(diagnostic.notes!.join(' ')).toMatch(/use gpu.* directives at line/);
       expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false); // nothing for a bundler to pick up
@@ -112,7 +114,8 @@ describe('errors are specific and a failed build cannot be mistaken for a good o
     try {
       const result = await build(project);
       const diagnostic = result.diagnostics.find((d) => d.source === 'syntax')!;
-      expect(diagnostic).toMatchObject({ file: 'src/wave.gpu.ts', line: 12 });
+      expect(diagnostic).toMatchObject({ line: 12 });
+      expect(posix(diagnostic.file!)).toBe('src/wave.gpu.ts');
       expect(typeof diagnostic.column).toBe('number');
     } finally {
       project.dispose();
@@ -123,7 +126,7 @@ describe('errors are specific and a failed build cannot be mistaken for a good o
     const project = createProject({ 'src/model.ts': `export const SCALE = ;\n` });
     try {
       const result = await build(project, true);
-      const diagnostic = result.diagnostics.find((d) => d.source === 'syntax' && d.file === 'src/model.ts')!;
+      const diagnostic = result.diagnostics.find((d) => d.source === 'syntax' && posix(d.file ?? '') === 'src/model.ts')!;
       expect(diagnostic).toMatchObject({ line: 1 });
     } finally {
       project.dispose();
@@ -135,7 +138,9 @@ describe('errors are specific and a failed build cannot be mistaken for a good o
     try {
       const result = await build(project);
       expect(result.ok).toBe(false);
-      expect(result.diagnostics.find((d) => d.source === 'types')).toMatchObject({ file: 'src/model.ts', line: 1, text: expect.stringContaining('TS2322') });
+      const types = result.diagnostics.find((d) => d.source === 'types');
+      expect(types).toMatchObject({ line: 1, text: expect.stringContaining('TS2322') });
+      expect(posix(types!.file!)).toBe('src/model.ts');
       expect(project.exists('shaders-dist/wave.gpu.js')).toBe(true); // JavaScript is fine; the manifest still says "error"
       expect(JSON.parse(project.read('shaders-dist/.manifest.json')).status).toBe('error');
     } finally {

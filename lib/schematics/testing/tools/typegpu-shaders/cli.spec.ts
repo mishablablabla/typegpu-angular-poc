@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BAD_SHADER, CLI, createProject, type Project } from './project';
+import { BAD_SHADER, CLI, createProject, posix, type Project } from './project';
 
 let project: Project;
 beforeEach(() => {
@@ -15,7 +15,13 @@ const run = (args: string[], timeout = 60_000) => {
   const result = spawnSync(process.execPath, [CLI, ...args], { cwd: project.root, encoding: 'utf8', timeout });
   return { code: result.status, out: result.stdout, err: result.stderr };
 };
-const JS = (code: string) => ['node', '-e', code];
+// The command goes through `cmd.exe` on Windows, which does not understand the quoting of an inline `node -e '...'`: run a script file.
+let scripts = 0;
+const JS = (code: string) => {
+  const file = `probe-${++scripts}.cjs`;
+  project.write(file, code);
+  return ['node', file];
+};
 
 describe('build / check', () => {
   it('build exits 0 and prints the module count; check then exits 0', () => {
@@ -33,7 +39,7 @@ describe('build / check', () => {
     project.write('src/wave.gpu.ts', BAD_SHADER);
     const result = run(['build']);
     expect(result.code).toBe(1);
-    expect(result.err).toContain('src/wave.gpu.ts');
+    expect(posix(result.err)).toContain('src/wave.gpu.ts');
     expect(result.err).toContain('TryStatement');
     expect(run(['check']).code).toBe(1);
   });
@@ -42,7 +48,7 @@ describe('build / check', () => {
     project.write('src/model.ts', 'export const a = 1;\nexport const = ;\n');
     const result = run(['build']);
     expect(result.code).toBe(1);
-    expect(result.err).toMatch(/src\/model\.ts:2:\d+ - error/);
+    expect(posix(result.err)).toMatch(/src\/model\.ts:2:\d+ - error/);
     expect(result.err).toContain('export const = ;');
   });
 
@@ -104,12 +110,16 @@ describe('run: the build always comes first', () => {
     project.remove('src/wave.gpu.ts'); // nothing to build, so no dependency of the tool is needed
     const bin = join(project.root, 'node_modules', '.bin');
     mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, 'qa-probe'), '#!/bin/sh\necho ran > probe-ran.txt\nexit 7\n');
-    chmodSync(join(bin, 'qa-probe'), 0o755);
+    if (process.platform === 'win32') {
+      writeFileSync(join(bin, 'qa-probe.cmd'), '@echo off\r\necho ran> probe-ran.txt\r\nexit /b 7\r\n'); // what npm puts in .bin on Windows
+    } else {
+      writeFileSync(join(bin, 'qa-probe'), '#!/bin/sh\necho ran > probe-ran.txt\nexit 7\n');
+      chmodSync(join(bin, 'qa-probe'), 0o755);
+    }
     const result = run(['run', '--', 'qa-probe']);
     expect(result.code).toBe(7);
     expect(project.read('probe-ran.txt')).toContain('ran');
-    expect(run(['run', '--', 'definitely-not-a-command']).code).toBe(127);
+    expect(run(['run', '--', 'definitely-not-a-command']).code).toBe(process.platform === 'win32' ? 1 : 127); // cmd.exe reports 1
   });
 });
 

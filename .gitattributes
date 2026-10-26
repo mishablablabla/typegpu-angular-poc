@@ -1,0 +1,2 @@
+# Checkouts on Windows must not turn scripts into CRLF (a "#!/usr/bin/env node\r" shebang cannot run on Linux/macOS).
+* text=auto eol=lf

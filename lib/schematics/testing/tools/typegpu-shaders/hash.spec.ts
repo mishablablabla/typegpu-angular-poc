@@ -58,7 +58,7 @@ describe('the closure of shader modules', () => {
 
   it('reaches modules several levels deep, and an edit that deep makes the output stale and is rebuilt', async () => {
     const config = resolveConfig({ root: project.root });
-    const names = computeClosure(config).files.map((file: string) => file.slice(config.src.length + 1));
+    const names = computeClosure(config).files.map((file: string) => file.slice(config.src.length + 1).replaceAll('\\', '/'));
     expect(names).toEqual(['deep/model2.ts', 'helper.ts', 'model.ts', 'wave.gpu.ts']);
     expect((await buildShaders({ root: project.root })).ok).toBe(true);
     for (const name of ['deep/model2', 'helper', 'model', 'wave.gpu']) expect(project.exists(`shaders-dist/${name}.js`), name).toBe(true);
