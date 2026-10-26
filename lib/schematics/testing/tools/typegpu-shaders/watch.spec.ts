@@ -71,7 +71,7 @@ describe('watch', () => {
     expect(posix(result.diagnostics[0].file)).toBe('src/wave.gpu.ts');
     const stub = project.read('shaders-dist/wave.gpu.js');
     expect(stub).toContain('typegpu-shaders-error'); // the banner element
-    expect(stub).toContain('src/wave.gpu.ts');
+    expect(stub).toMatch(/src(\/|\\+)wave\.gpu\.ts/); // a JS string literal: the Windows separator is escaped
     await expect(project.import('shaders-dist/wave.gpu.js')).rejects.toThrow(/TryStatement/); // nothing runs on stale output
     expect(project.read('shaders-dist/model.js')).toBe(goodModel);
     // and `check` agrees that this is not a usable build
@@ -200,7 +200,7 @@ describe('watch: a shader module imported by a relative path (the dev server wou
     project.write('src/app/typo.ts', `import { nope } from '@shaders/nope.gpu';\nexport const typo = nope;\n`);
     project.write('src/app/late.ts', `import { wave } from '../wave.gpu';\nexport const late = wave;\n`);
     await waitFor(() => imports.length === 2, 'the second report');
-    expect(imports[1]!.map((p) => p.file).sort()).toEqual(['src/app/early.ts', 'src/app/late.ts']);
+    expect(imports[1]!.map((p) => posix(p.file)).sort()).toEqual(['src/app/early.ts', 'src/app/late.ts']);
 
     project.write('src/app/late.ts', `export const late = 1;\n`); // fixing one changes the set again; a save that changes nothing reports nothing
     await waitFor(() => imports.length === 3, 'the report after the fix');
