@@ -204,7 +204,7 @@ describe('watch: a shader module imported by a relative path (the dev server wou
 
     project.write('src/app/late.ts', `export const late = 1;\n`); // fixing one changes the set again; a save that changes nothing reports nothing
     await waitFor(() => imports.length === 3, 'the report after the fix');
-    expect(imports[2]!.map((p) => p.file)).toEqual(['src/app/early.ts']);
+    expect(imports[2]!.map((p) => posix(p.file))).toEqual(['src/app/early.ts']);
     project.write('src/app/other.ts', `export const other = 1;\n`);
     await new Promise((resolve) => setTimeout(resolve, 300));
     await watcher.settled();
