@@ -34,7 +34,8 @@ else
   (cd "$root/lib" && npm run pack >/dev/null)
   cp "$root"/lib/typegpu-poc-angular-*.tgz "$work/pkg.tgz"
 fi
-tar tzf "$work/pkg.tgz" | grep -q 'package/schematics/collection.json' || { echo "FAIL: no schematics in the tarball"; exit 1; }
+# (not `tar | grep -q`: grep exits at the first match, tar then dies of SIGPIPE and `pipefail` turns that into a failure)
+tar tzf "$work/pkg.tgz" > "$work/pkg.list" && grep -q 'package/schematics/collection.json' "$work/pkg.list" || { echo "FAIL: no schematics in the tarball"; exit 1; }
 
 step "ng new (Angular CLI $cli)"
 cd "$work"
