@@ -155,8 +155,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { angular: '20', node: '22.22.3' }
-          - { angular: '21', node: '22.22.3' }
+          # Node 24 for all: `ng new` on Node 22's npm 10 hit an arborist crash ("Cannot read properties of null (reading 'edgesOut')") in the
+          # install step of Angular 21, before any of our code ran. Node 22 is covered by the lib and app jobs.
+          - { angular: '20', node: '24' }
+          - { angular: '21', node: '24' }
           - { angular: '22', node: '24' }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
