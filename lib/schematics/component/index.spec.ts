@@ -114,6 +114,39 @@ describe('component: safety', () => {
     await expect(generate(await configured(), { name: '1-bad' })).rejects.toThrow();
   });
 
+  it('refuses names whose selector would be broken (NG8001), with a message that says what is allowed', async () => {
+    for (const name of ['foo.bar', 'foo@bar', 'foo$', 'my canvas!', 'a/foo.bar', '-x', 'foo:bar']) {
+      const tree = await configured();
+      await expect(generate(tree, { name }), name).rejects.toThrow(/cannot be used as a component name.*letters, digits and dashes/s);
+      expect(tree.files.some((f) => f.startsWith('/src/app/foo') || f.includes('foo.bar')), name).toBe(false);
+    }
+  });
+
+  it('keeps accepting the usual naming styles', async () => {
+    for (const [name, folder, cls] of [
+      ['my-fancy-canvas', 'my-fancy-canvas', 'MyFancyCanvas'],
+      ['MyCanvas', 'my-canvas', 'MyCanvas'],
+      ['myCanvas', 'my-canvas', 'MyCanvas'],
+      ['my_canvas', 'my-canvas', 'MyCanvas'],
+      ['canvas2d', 'canvas2d', 'Canvas2d'],
+      ['a/b/foo-bar', 'a/b/foo-bar', 'FooBar'],
+    ] as const) {
+      const tree = await generate(await configured(), { name });
+      const file = `/src/app/${folder}/${folder.split('/').pop()}.ts`;
+      expect(tree.readText(file), name).toContain(`export class ${cls} {`);
+    }
+  });
+
+  it('refuses foo when foo-scene exists, and foo-scene when foo exists: both would declare FooScene / app-foo-scene', async () => {
+    const withScene = await generate(await configured(), { name: 'foo-scene' });
+    await expect(generate(withScene, { name: 'foo' })).rejects.toThrow(/"foo" would clash with the existing component folder "foo-scene".*FooScene.*foo-scene/s);
+    const withFoo = await generate(await configured(), { name: 'foo' });
+    await expect(generate(withFoo, { name: 'foo-scene' })).rejects.toThrow(/"foo-scene" would clash with the existing component "foo"/);
+    // unrelated names are fine
+    const both = await generate(withFoo, { name: 'bar' });
+    expect(both.exists('/src/app/bar/bar.ts')).toBe(true);
+  });
+
   it('does not change angular.json or package.json', async () => {
     const base = await configured();
     const before = { w: base.readText('angular.json'), p: base.readText('package.json') };
@@ -121,5 +154,72 @@ describe('component: safety', () => {
     expect(tree.readText('angular.json')).toBe(before.w);
     expect(tree.readText('package.json')).toBe(before.p);
     expect(readJson(tree, 'package.json').scripts['check:shaders']).toBeDefined();
+  });
+});
+
+describe('component: any path that points at the plugin counts as configured', () => {
+  const PLUGIN = 'node_modules/@typegpu-poc/angular/tools/typegpu-shaders.esbuild.mjs';
+
+  it('accepts the conventional path in string and object form, with or without ./', async () => {
+    for (const entry of [PLUGIN, `./${PLUGIN}`, { path: PLUGIN }, { path: `./${PLUGIN}`, options: {} }]) {
+      const tree = await configured();
+      editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.options.plugins = [entry]));
+      expect((await generate(tree, { name: 'my-canvas' })).exists('/src/app/my-canvas/my-canvas.ts')).toBe(true);
+    }
+  });
+
+  it('refuses a project whose plugins list has no shader plugin', async () => {
+    const tree = await configured();
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.options.plugins = ['tools/other.mjs']));
+    await expect(generate(tree, { name: 'my-canvas' })).rejects.toThrow(/not set up for TypeGPU shaders/);
+  });
+});
+
+describe('component: in a project set up with `ng add --shaders prebuild`', () => {
+  const prebuild = async (apps?: string[], firstAtRoot = true) =>
+    ours().runSchematic('ng-add', { shaders: 'prebuild', project: apps?.[0] }, await workspaceWith(apps, '22.0.0', firstAtRoot));
+
+  it('generates the component and its shader, importing the shader through @shaders/ (not by a relative path)', async () => {
+    const tree = await generate(await prebuild(), { name: 'my-canvas' });
+    expect(tree.files.filter((f) => f.includes('my-canvas')).sort()).toEqual([
+      '/src/app/my-canvas/my-canvas.gpu.ts',
+      '/src/app/my-canvas/my-canvas.spec.ts',
+      '/src/app/my-canvas/my-canvas.ts',
+    ]);
+    const ts = tree.readText('/src/app/my-canvas/my-canvas.ts');
+    expect(ts).toContain("import { sceneFragment } from '@shaders/app/my-canvas/my-canvas.gpu';");
+    expect(ts).not.toContain("'./my-canvas.gpu'");
+    expect(tree.readText('/src/app/my-canvas/my-canvas.gpu.ts')).toContain("'use gpu';");
+  });
+
+  it('the alias is the path under the source root, for --path and for an application in projects/<name>', async () => {
+    const nested = await generate(await prebuild(), { name: 'orb', path: 'src/app/features' });
+    expect(nested.readText('/src/app/features/orb/orb.ts')).toContain("from '@shaders/app/features/orb/orb.gpu'");
+    const project = await generate(await prebuild(['shop'], false), { name: 'orb', project: 'shop' });
+    expect(project.readText('/projects/shop/src/app/orb/orb.ts')).toContain("from '@shaders/app/orb/orb.gpu'");
+  });
+
+  it('refuses a path outside the source root: the shader would not be built', async () => {
+    const tree = await prebuild();
+    await expect(generate(tree, { name: 'orb', path: 'lib/elsewhere' })).rejects.toThrow(/outside the source root of "app" \(src\)/);
+    expect(tree.exists('/lib/elsewhere/orb/orb.ts')).toBe(false);
+  });
+
+  it('still refuses overwriting files and clashing scene names, like the plugin mode', async () => {
+    const once = await generate(await prebuild(), { name: 'my-canvas' });
+    once.overwrite('/src/app/my-canvas/my-canvas.ts', '// edited by the user\n');
+    await expect(generate(once, { name: 'my-canvas' })).rejects.toThrow(/merge conflicted on path/);
+    await expect(generate(once, { name: 'my-canvas-scene' })).rejects.toThrow(/would clash with the existing component "my-canvas"/);
+  });
+
+  it('does not change angular.json, package.json or tsconfig files', async () => {
+    const before = await prebuild();
+    const files = ['/angular.json', '/package.json', '/tsconfig.json', '/tsconfig.app.json'].map((f) => [f, before.readText(f)] as const);
+    const after = await generate(before, { name: 'my-canvas' });
+    for (const [file, text] of files) expect(after.readText(file)).toBe(text);
+  });
+
+  it('the refusal in an unconfigured project names both ways to configure it', async () => {
+    await expect(generate(await workspaceWith(), { name: 'my-canvas' })).rejects.toThrow(/--shaders prebuild/);
   });
 });

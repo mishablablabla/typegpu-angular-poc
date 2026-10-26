@@ -75,6 +75,9 @@
             "tsConfig": "tsconfig.spec.json",
             "reporters": [
               "default"
+            ],
+            "setupFiles": [
+              "src/test-setup.ts"
             ]
           }
         }

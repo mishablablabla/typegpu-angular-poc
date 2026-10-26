@@ -5,6 +5,12 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "shaders": {
+      "type": "string",
+      "enum": ["plugin", "prebuild"],
+      "default": "plugin",
+      "description": "How 'use gpu' shaders are built. 'plugin': the esbuild plugin through the community custom-esbuild builders (angular.json is changed). 'prebuild': the typegpu-shaders command transforms them before Angular builds (angular.json is not changed; package.json scripts, tsconfig paths and dependencies are)."
+    },
     "project": {
       "type": "string",
       "description": "The application to configure. Required when the workspace has several applications.",

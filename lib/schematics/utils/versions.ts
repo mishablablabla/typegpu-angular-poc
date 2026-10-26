@@ -1,5 +1,5 @@
 import { SchematicsException } from '@angular-devkit/schematics';
-import { SUPPORTED_ANGULAR_MAJORS } from './constants';
+import { REFUSAL_NOTE, SUPPORTED_ANGULAR_MAJORS } from './constants';
 
 export interface Version {
   major: number;
@@ -18,12 +18,12 @@ export function angularMajor(range: string | undefined): number {
   if (!version) {
     throw new SchematicsException(
       `Cannot tell the Angular version from "@angular/core": "${range ?? '(missing)'}" in package.json. ` +
-        `Use a version range such as ^22.0.0 and run the schematic again.`,
+        `Use a version range such as ^22.0.0 and run the schematic again.\n${REFUSAL_NOTE}`,
     );
   }
   if (!SUPPORTED_ANGULAR_MAJORS.includes(version.major)) {
     throw new SchematicsException(
-      `Angular ${version.major} is not supported. This package was built and tested with Angular ${SUPPORTED_ANGULAR_MAJORS.join(', ')}.`,
+      `Angular ${version.major} is not supported. This package was built and tested with Angular ${SUPPORTED_ANGULAR_MAJORS.join(', ')}.\n${REFUSAL_NOTE}`,
     );
   }
   return version.major;
@@ -34,7 +34,7 @@ export function assertTypegpuRange(range: string): Version {
   const version = lowestVersion(range);
   if (!version || version.major !== 0 || version.minor !== 12 || version.patch < 8) {
     throw new SchematicsException(
-      `package.json has typegpu "${range}", but this package needs typegpu ^0.12.8. Update it and run the schematic again.`,
+      `package.json has typegpu "${range}", but this package needs typegpu ^0.12.8. Update it and run the schematic again.\n${REFUSAL_NOTE}`,
     );
   }
   return version;

@@ -20,13 +20,13 @@ export function ours(): SchematicTestRunner {
 }
 
 /** A workspace like `ng new` creates it, with the given applications (the first one at the workspace root). */
-export async function workspaceWith(applications: string[] = ['app'], angularVersion = '22.0.0'): Promise<UnitTestTree> {
+export async function workspaceWith(applications: string[] = ['app'], angularVersion = '22.0.0', firstAtRoot = true): Promise<UnitTestTree> {
   const angular = new SchematicTestRunner('@schematics/angular', ANGULAR_COLLECTION);
   let tree = await angular.runSchematic('workspace', { name: 'ws', version: angularVersion, newProjectRoot: 'projects' });
   for (const [index, name] of applications.entries()) {
     tree = await angular.runSchematic(
       'application',
-      { name, projectRoot: index === 0 ? '' : `projects/${name}`, style: 'css', routing: false, skipInstall: true },
+      { name, projectRoot: index === 0 && firstAtRoot ? '' : `projects/${name}`, style: 'css', routing: false, skipInstall: true },
       tree,
     );
   }

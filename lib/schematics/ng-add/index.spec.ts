@@ -27,7 +27,7 @@ describe('ng add: a clean standalone application', () => {
     });
 
     const pkg = readJson(tree, 'package.json');
-    expect(pkg.dependencies.typegpu).toBe('0.12.8');
+    expect(pkg.dependencies.typegpu).toBe('^0.12.8');
     expect(pkg.devDependencies['@angular-builders/custom-esbuild']).toBe('^22.0.0');
     expect(pkg.devDependencies['@babel/core']).toBe('^7.28.0');
     expect(pkg.devDependencies['unplugin-typegpu']).toBe('0.12.6');
@@ -179,14 +179,31 @@ describe('ng add: setups it must not change', () => {
     expect(tree.readText('package.json')).toBe(before.pkg);
   };
 
-  it('a webpack build', () =>
-    refuse((json) => (json.projects.app.architect.build.builder = '@angular-devkit/build-angular:browser'), /@angular-devkit\/build-angular:browser.*use-application-builder.*Nothing was changed/s));
+  it('a webpack build, and says truthfully that the package itself was installed by ng add', async () => {
+    await refuse((json) => (json.projects.app.architect.build.builder = '@angular-devkit/build-angular:browser'), /@angular-devkit\/build-angular:browser.*use-application-builder/s);
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.builder = '@angular-devkit/build-angular:browser'));
+    const message = await ngAdd(tree).then(
+      () => '',
+      (error: Error) => error.message,
+    );
+    // ng add installs the package before the schematic runs: "Nothing was changed" would be false
+    expect(message).not.toMatch(/Nothing was changed|not touched/i);
+    expect(message).toMatch(/@typegpu-poc\/angular itself is already installed.*angular\.json.*not modified.*npm uninstall @typegpu-poc\/angular/s);
+  });
 
-  it('another builder on the build target', () =>
-    refuse((json) => (json.projects.app.architect.build.builder = 'my-company:build'), /"my-company:build"/));
+  it('another builder on the build target, without suggesting the webpack migration', async () => {
+    await refuse((json) => (json.projects.app.architect.build.builder = 'my-company:build'), /"my-company:build".*only extends the stock esbuild application builder/s);
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.builder = 'my-company:build'));
+    await expect(ngAdd(tree)).rejects.not.toThrow(/use-application-builder/);
+  });
+
+  it('browser-esbuild, the predecessor of the application builder', () =>
+    refuse((json) => (json.projects.app.architect.build.builder = '@angular-devkit/build-angular:browser-esbuild'), /browser-esbuild.*Switch the target to "@angular\/build:application"/s));
 
   it('a dev server that does not use the esbuild build', () =>
-    refuse((json) => (json.projects.app.architect.serve.builder = '@angular-devkit/build-angular:dev-server'), /serves with "@angular-devkit\/build-angular:dev-server"/));
+    refuse((json) => (json.projects.app.architect.serve.builder = 'my-company:serve'), /serves with "my-company:serve"/));
 
   it('a plugins option that is not a list', () =>
     refuse((json) => (json.projects.app.architect.build.options.plugins = 'x'), /not a list/));
@@ -198,7 +215,8 @@ describe('ng add: setups it must not change', () => {
       [(pkg: any) => (pkg.devDependencies['@babel/core'] = '^8.0.0'), /@babel\/core "\^8.0.0"/],
       [(pkg: any) => (pkg.dependencies.typegpu = '^0.11.0'), /typegpu "\^0\.11\.0".*\^0\.12\.8/],
       [(pkg: any) => (pkg.dependencies.typegpu = '0.12.7'), /typegpu "0\.12\.7"/],
-      [(pkg: any) => (pkg.dependencies['@angular/core'] = '^19.0.0'), /Angular 19 is not supported/],
+      // the unsupported-Angular path is a refusal too: it carries the same honest note, and no "nothing changed" claim
+      [(pkg: any) => (pkg.dependencies['@angular/core'] = '^19.0.0'), /Angular 19 is not supported.*Angular 20, 21, 22.*already installed.*not modified/s],
     ] as const) {
       const tree = await workspaceWith();
       editJson(tree, 'package.json', edit);
@@ -253,5 +271,104 @@ describe('ng add: test targets', () => {
     editJson(tree, 'angular.json', (json) => delete json.projects.app.architect.test);
     const after = readJson(await ngAdd(tree), 'angular.json');
     expect(after.projects.app.architect.test).toBeUndefined();
+  });
+});
+
+describe('ng add: legacy builder names', () => {
+  it('treats @angular-devkit/build-angular:application and :dev-server as the stock esbuild builders', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      json.projects.app.architect.build.builder = '@angular-devkit/build-angular:application';
+      json.projects.app.architect.serve.builder = '@angular-devkit/build-angular:dev-server';
+    });
+    const after = readJson(await ngAdd(tree), 'angular.json');
+    expect(after.projects.app.architect.build.builder).toBe('@angular-builders/custom-esbuild:application');
+    expect(after.projects.app.architect.serve.builder).toBe('@angular-builders/custom-esbuild:dev-server');
+    expect(after.projects.app.architect.build.options.plugins).toEqual([PLUGIN]);
+  });
+});
+
+describe('ng add: the check script', () => {
+  it('also checks the SSR server bundle when the application has one', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      json.projects.app.architect.build.options.server = 'src/main.server.ts';
+      json.projects.app.architect.build.options.ssr = { entry: 'src/server.ts' };
+    });
+    expect(readJson(await ngAdd(tree), 'package.json').scripts['check:shaders']).toBe(
+      `ng build --configuration production && node ${CHECK} dist/app/browser dist/app/server`,
+    );
+    const custom = await workspaceWith();
+    editJson(custom, 'angular.json', (json) => {
+      json.projects.app.architect.build.options.server = 'src/main.server.ts';
+      json.projects.app.architect.build.options.outputPath = { base: 'out', browser: 'web', server: 'node' };
+    });
+    expect(readJson(await ngAdd(custom), 'package.json').scripts['check:shaders']).toContain(` ${CHECK} out/web out/node`);
+  });
+
+  it('does not add a server directory to an application without SSR', async () => {
+    expect(readJson(await ngAdd(await workspaceWith()), 'package.json').scripts['check:shaders']).not.toContain('server');
+  });
+});
+
+describe('ng add: stock-only options on the test target', () => {
+  const logsOf = (runner: ReturnType<typeof ours>) => {
+    const logs: string[] = [];
+    runner.logger.subscribe((entry) => logs.push(entry.message));
+    return logs;
+  };
+
+  it('drops every option the custom unit-test schema lacks (runner, splitting) and logs what it removed', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      json.projects.app.architect.test.options = { splitting: false, runner: 'vitest', coverage: true, watch: false, include: ['src/**/*.spec.ts'], notAnOption: 1 };
+    });
+    const runner = ours();
+    const logs = logsOf(runner);
+    const after = readJson(await runner.runSchematic('ng-add', {}, tree), 'angular.json');
+    const options = after.projects.app.architect.test.options;
+    expect(options.splitting).toBeUndefined();
+    expect(options.runner).toBeUndefined();
+    expect(options.notAnOption).toBeUndefined();
+    expect(options).toMatchObject({ coverage: true, watch: false, include: ['src/**/*.spec.ts'], buildTarget: 'app:build:development' });
+    expect(logs.join('\n')).toMatch(/Removed from the "test" target of "app".*: splitting, runner, notAnOption\..*does not support them.*Vitest only/s);
+  });
+
+  it('cleans test configurations too', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      json.projects.app.architect.test.options = { runner: 'vitest' };
+      json.projects.app.architect.test.configurations = { ci: { splitting: true, watch: false } };
+    });
+    const test = readJson(await ngAdd(tree), 'angular.json').projects.app.architect.test;
+    expect(test.configurations.ci).toEqual({ watch: false });
+  });
+
+  it('says nothing when there was nothing to remove', async () => {
+    const runner = ours();
+    const logs = logsOf(runner);
+    await runner.runSchematic('ng-add', {}, await workspaceWith());
+    expect(logs.join('\n')).not.toMatch(/Removed from the "test" target/);
+  });
+
+  it('does not touch the options of a target that already uses the custom builder', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      json.projects.app.architect.test = { builder: '@angular-builders/custom-esbuild:unit-test', options: { watch: false, whatever: 1 } };
+    });
+    expect(readJson(await ngAdd(tree), 'angular.json').projects.app.architect.test.options.whatever).toBe(1);
+  });
+
+  it('uses the Angular 21 option list on Angular 21 (no isolate/quiet in that schema)', async () => {
+    const tree = await workspaceWith(['app'], '21.0.0');
+    editJson(tree, 'package.json', (pkg) => (pkg.dependencies['@angular/core'] = '^21.0.0'));
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect.test.options = { isolate: true, quiet: true, watch: false }));
+    const options = readJson(await ngAdd(tree), 'angular.json').projects.app.architect.test.options;
+    expect(options.isolate).toBeUndefined();
+    expect(options.quiet).toBeUndefined();
+    expect(options.watch).toBe(false);
+    const on22 = await workspaceWith();
+    editJson(on22, 'angular.json', (json) => (json.projects.app.architect.test.options = { isolate: true, quiet: true }));
+    expect(readJson(await ngAdd(on22), 'angular.json').projects.app.architect.test.options).toMatchObject({ isolate: true, quiet: true });
   });
 });

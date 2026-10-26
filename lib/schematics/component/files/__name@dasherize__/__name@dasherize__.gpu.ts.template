@@ -1,5 +1,6 @@
-// Shader of <%= classifiedName %>. Modules named `*.gpu.ts` are transformed at build time (see the
-// shader plugin in angular.json), which is what makes the `'use gpu'` function below turn into WGSL.
+// Shader of <%= classifiedName %>. Modules named `*.gpu.ts` are transformed at build time (by the shader plugin in
+// angular.json, or by the `typegpu-shaders` prebuild that the project's builders run first), which is what makes the
+// `'use gpu'` function below turn into WGSL.
 // Keep this file free of Angular decorators and Angular imports. For vectors use `std.*`
 // (`std.mul(a, b)`), not `a * b`; plain number maths (`Math.sin`, `*`, `+`) is fine.
 import tgpu, { d, std } from 'typegpu';

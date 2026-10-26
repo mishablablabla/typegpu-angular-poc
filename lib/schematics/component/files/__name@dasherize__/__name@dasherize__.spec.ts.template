@@ -43,8 +43,12 @@ describe('<%= classifiedName %>', () => {
     });
     const fixture = TestBed.createComponent(<%= classifiedName %>);
     fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
+    // Wait for what is asserted, not for `whenStable()`: under zone.js (Angular 21/22 projects created with `--no-zoneless`) it can return
+    // before the rejected factory has updated the component, which made this spec fail right after `ng generate`.
+    for (let attempt = 0; attempt < 50 && !fixture.nativeElement.textContent.includes('GPU initialisation failed'); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve));
+      fixture.detectChanges();
+    }
     expect(fixture.nativeElement.textContent).toContain('GPU initialisation failed');
     expect(fixture.nativeElement.querySelector('button')?.textContent).toContain('Retry');
   });
