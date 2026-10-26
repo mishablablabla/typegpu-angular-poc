@@ -1,8 +1,10 @@
 // `check`: does the generated package match the sources, and does the application import it the way that works?
+import { mkdirSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain ES module without types
 import { buildShaders, checkShaders, ensureShaders } from '../../../../tools/typegpu-shaders/index.mjs';
-import { BAD_SHADER, createProject, SHADER, type Project } from './project';
+import { BAD_SHADER, createProject, posix, SHADER, tsconfigWith, type Project } from './project';
 
 type Problem = { code: string; message: string };
 const check = (project: Project, fixImports = false) => checkShaders({ root: project.root }, { fixImports }) as { ok: boolean; problems: Problem[]; fixed: number };
@@ -185,3 +187,88 @@ describe('stray imports: comments are not imports (found by QA: a migration comm
   });
 });
 
+
+describe('check: a shader module imported through a tsconfig `paths` / `baseUrl` alias (found by QA: only the bundle scan noticed, after bundling)', () => {
+  const PATHS = { paths: { '@app/*': ['./src/app/*'], '@src/*': ['./src/*'], '@shaders/*': ['./shaders-dist/*'] } };
+  const aliased = (project: Project) => check(project).problems.filter((p) => p.code === 'aliased');
+
+  beforeEach(() => {
+    project.write('tsconfig.app.json', tsconfigWith(PATHS));
+    project.write('src/app/wave.gpu.ts', SHADER.replace("'./model'", "'../model'"));
+  });
+
+  it('reports the import before bundling and names the @shaders import that works', () => {
+    project.write('src/app/canvas.ts', `import { wave } from '@app/wave.gpu';\nexport const c = wave;\n`);
+    const { ok, problems } = check(project);
+    const found = problems.filter((p) => p.code === 'aliased');
+    expect(ok).toBe(false);
+    expect(found).toHaveLength(1);
+    expect(posix(found[0]!.message)).toContain('src/app/canvas.ts');
+    expect(found[0]!.message).toContain("'@app/wave.gpu'");
+    expect(found[0]!.message).toContain("Import '@shaders/app/wave.gpu' instead");
+    expect(posix(found[0]!.message)).toContain('src/app/wave.gpu.ts');
+  });
+
+  it('also finds a plain module the shaders import (a second instance of it), and dynamic imports', () => {
+    project.write('src/app/a.ts', `export const load = () => import('@src/wave.gpu');\n`);
+    project.write('src/app/b.ts', `export { state } from '@src/model';\n`);
+    expect(aliased(project).map((p) => p.message.match(/Import '([^']+)'/)![1]).sort()).toEqual(['@shaders/model', '@shaders/wave.gpu']);
+  });
+
+  it('finds a bare specifier that `baseUrl` resolves', () => {
+    project.write('tsconfig.app.json', tsconfigWith({ baseUrl: '.' }));
+    project.write('src/app/canvas.ts', `import { wave } from 'src/wave.gpu';\nexport const c = wave;\n`);
+    expect(aliased(project).map((p) => p.message)).toEqual([expect.stringContaining("Import '@shaders/wave.gpu' instead")]);
+  });
+
+  it('finds it when `paths` comes from a tsconfig the project extends (the base is in another folder)', () => {
+    project.write('config/tsconfig.base.json', JSON.stringify({ compilerOptions: { paths: { '@lib/*': ['../src/*'] } } }));
+    project.write('tsconfig.app.json', tsconfigWith({}, { extends: './config/tsconfig.base.json' }));
+    project.write('src/app/canvas.ts', `import { wave } from '@lib/wave.gpu';\nexport const c = wave;\n`);
+    expect(aliased(project)).toHaveLength(1);
+  });
+
+  it('does not flag an alias to an ordinary application module, a `?raw` import, or a package', () => {
+    project.write('src/app/util.ts', 'export const u = 1;\n');
+    project.write('src/app/canvas.ts', `import { u } from '@app/util';\nimport text from '@app/wave.gpu?raw';\nimport tgpu from 'typegpu';\nexport const c = [u, text, tgpu];\n`);
+    expect(aliased(project)).toEqual([]);
+    expect(check(project).problems.map((p) => p.code)).not.toContain('aliased');
+  });
+
+  it('does not flag a node_modules package named like a shader module (baseUrl finds nothing there, the package is used)', () => {
+    // a node_modules of its own: the one the helper linked is the package's, which a test must not write into
+    const modules = project.path('node_modules');
+    const lib = join(__dirname, '../../../../node_modules');
+    rmSync(modules);
+    mkdirSync(modules);
+    for (const entry of readdirSync(lib)) if (!entry.startsWith('.')) symlinkSync(join(lib, entry), join(modules, entry), 'junction');
+    mkdirSync(join(modules, 'wave.gpu'));
+    project.write('node_modules/wave.gpu/package.json', JSON.stringify({ name: 'wave.gpu', version: '1.0.0', types: 'index.d.ts' }));
+    project.write('node_modules/wave.gpu/index.d.ts', 'export const wave: number;\n');
+    project.write('tsconfig.app.json', tsconfigWith({ baseUrl: '.' })); // `wave.gpu` is not ./wave.gpu: the shader is ./src/wave.gpu.ts
+    project.write('src/app/canvas.ts', `import { wave } from 'wave.gpu';\nexport const c = wave;\n`);
+    expect(aliased(project)).toEqual([]);
+    project.write('src/app/canvas.ts', `import { wave } from 'src/wave.gpu';\nexport const c = wave;\n`); // control: the same project does flag the real one
+    expect(aliased(project)).toHaveLength(1);
+  });
+
+  it('a tsconfig that cannot be read gives no alias problem and does not throw (the build reports the tsconfig itself)', () => {
+    project.write('src/app/canvas.ts', `import { wave } from '@app/wave.gpu';\nexport const c = wave;\n`);
+    for (const broken of ['{ "compilerOptions": { "paths": ', JSON.stringify({ extends: './missing.json' })]) {
+      project.write('tsconfig.app.json', broken);
+      expect(() => check(project)).not.toThrow();
+      expect(check(project).problems.map((p) => p.code)).not.toContain('aliased');
+    }
+    project.remove('tsconfig.app.json');
+    project.remove('tsconfig.json');
+    expect(() => check(project)).not.toThrow();
+  });
+
+  it('--fix-imports rewrites the aliased specifier, and the result passes', () => {
+    project.write('src/app/canvas.ts', `import { wave } from '@app/wave.gpu';\nimport { state } from "@src/model";\nexport const c = [wave, state];\n`);
+    const result = check(project, true);
+    expect(result.fixed).toBe(1);
+    expect(project.read('src/app/canvas.ts')).toBe(`import { wave } from '@shaders/app/wave.gpu';\nimport { state } from "@shaders/model";\nexport const c = [wave, state];\n`);
+    expect(aliased(project)).toEqual([]);
+  });
+});

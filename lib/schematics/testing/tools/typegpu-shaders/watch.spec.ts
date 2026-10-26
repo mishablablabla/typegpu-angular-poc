@@ -6,7 +6,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain ES module without types
 import { checkShaders, watchShaders } from '../../../../tools/typegpu-shaders/index.mjs';
-import { BAD_SHADER, createProject, posix, SHADER, waitFor, type Project } from './project';
+import { BAD_SHADER, createProject, posix, SHADER, tsconfigWith, waitFor, type Project } from './project';
 
 type Result = { ok: boolean; diagnostics: { source: string; file?: string; text: string }[] };
 
@@ -205,6 +205,33 @@ describe('watch: a shader module imported by a relative path (the dev server wou
     project.write('src/app/late.ts', `export const late = 1;\n`); // fixing one changes the set again; a save that changes nothing reports nothing
     await waitFor(() => imports.length === 3, 'the report after the fix');
     expect(imports[2]!.map((p) => posix(p.file))).toEqual(['src/app/early.ts']);
+    project.write('src/app/other.ts', `export const other = 1;\n`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await watcher.settled();
+    expect(imports).toHaveLength(3);
+  });
+});
+
+describe('watch: a shader module imported through a tsconfig paths alias (QA: `ng serve` printed nothing, the page had no canvas)', () => {
+  it('is reported at the start, again when the set of such imports changes, and not for a save that changes nothing', async () => {
+    project.write('tsconfig.app.json', tsconfigWith({ paths: { '@app/*': ['./src/app/*'], '@shaders/*': ['./shaders-dist/*'] } }));
+    project.write('src/app/canvas.gpu.ts', SHADER.replace("'./model'", "'../model'"));
+    project.write('src/app/canvas.ts', `import { wave } from '@app/canvas.gpu';\nexport const canvas = wave;\n`);
+    const imports: { file: string; text: string }[][] = [];
+    watcher = watchShaders({ root: project.root }, { onBuild: (result: Result) => results.push(result), onImports: (problems: { file: string; text: string }[]) => imports.push(problems) });
+    await watcher.ready;
+    expect(imports).toHaveLength(1);
+    expect(posix(imports[0]![0]!.file)).toBe('src/app/canvas.ts');
+    expect(imports[0]![0]!.text).toContain("Import '@shaders/app/canvas.gpu' instead");
+    expect(imports[0]![0]!.text).toContain('tsconfig paths/baseUrl alias');
+
+    project.write('src/app/second.ts', `import { wave } from '@app/canvas.gpu';\nexport const second = wave;\n`);
+    await waitFor(() => imports.length === 2, 'the second report');
+    expect(imports[1]!.map((p) => posix(p.file)).sort()).toEqual(['src/app/canvas.ts', 'src/app/second.ts']);
+
+    project.write('src/app/canvas.ts', `import { wave } from '@shaders/app/canvas.gpu';\nexport const canvas = wave;\n`); // the fix
+    await waitFor(() => imports.length === 3, 'the report after the fix');
+    expect(imports[2]!.map((p) => posix(p.file))).toEqual(['src/app/second.ts']);
     project.write('src/app/other.ts', `export const other = 1;\n`);
     await new Promise((resolve) => setTimeout(resolve, 300));
     await watcher.settled();

@@ -6,7 +6,7 @@ import { logging, schema } from '@angular-devkit/core';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BAD_SHADER, createProject, posix, SHADER, waitFor, type Project } from '../tools/typegpu-shaders/project';
+import { BAD_SHADER, createProject, posix, SHADER, tsconfigWith, waitFor, type Project } from '../tools/typegpu-shaders/project';
 
 const BUILDERS = join(__dirname, '..', '..', '..', 'builders');
 const FIXTURES = join(__dirname, '..', 'fixtures', 'angular-build');
@@ -172,6 +172,20 @@ describe('application wrapper: the shaders are current before the official build
     expect(result.success).toBe(false);
     expect(logs.map((l) => l.message).join('\n')).toContain("Import '@shaders/wave.gpu' instead");
     expect(calls).toHaveLength(0);
+  });
+
+  it('refuses to build when a shader module is imported through a tsconfig paths alias, before the official builder (and its bundling) runs, with the import that works', async () => {
+    project.write('tsconfig.app.json', tsconfigWith({ paths: { '@app/*': ['./src/app/*'], '@shaders/*': ['./shaders-dist/*'] } }));
+    project.write('src/app/canvas.gpu.ts', SHADER.replace("'./model'", "'../model'"));
+    project.write('src/app/canvas.ts', `import { wave } from '@app/canvas.gpu';\nexport const x = wave;\n`);
+    setup('application', '@angular/build:application', 'application');
+    const { result } = await run('build', { tsConfig: 'tsconfig.app.json' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('imported in a way that cannot work');
+    const text = posix(logs.map((l) => l.message).join('\n'));
+    expect(text).toContain("'@app/canvas.gpu'");
+    expect(text).toContain("Import '@shaders/app/canvas.gpu' instead");
+    expect(calls).toHaveLength(0); // the official builder, which bundles, never started
   });
 
   it('an @shaders import that matches nothing fails the build before Angular reports an unresolved module', async () => {
@@ -435,6 +449,28 @@ describe('the dev server and a relative import of a shader module', () => {
     const running = run('serve', { buildTarget: 'app:build' });
     await waitFor(() => calls.length === 1, 'the dev server to start');
     expect(logs.filter((l) => l.level === 'error').map((l) => l.message).join('\n')).toContain("Import '@shaders/wave.gpu' instead");
+    stop();
+    await (await running).finished;
+  });
+});
+
+describe('the dev server and a shader module imported through a tsconfig paths alias', () => {
+  it('says so in the terminal (nothing else would: the page just has no canvas)', async () => {
+    project.write('tsconfig.app.json', tsconfigWith({ paths: { '@app/*': ['./src/app/*'], '@shaders/*': ['./shaders-dist/*'] } }));
+    project.write('src/app/canvas.gpu.ts', SHADER.replace("'./model'", "'../model'"));
+    project.write('src/app/canvas.ts', `import { wave } from '@app/canvas.gpu';\nexport const x = wave;\n`);
+    let stop!: () => void;
+    const stopped = new Promise<void>((resolve) => (stop = resolve));
+    stockBehavior = async function* () {
+      yield { success: true };
+      await stopped;
+    };
+    setup('dev-server', '@angular/build:dev-server', 'dev-server');
+    const running = run('serve', { buildTarget: 'app:build' });
+    await waitFor(() => calls.length === 1, 'the dev server to start');
+    const errors = posix(logs.filter((l) => l.level === 'error').map((l) => l.message).join('\n'));
+    expect(errors).toContain("'@app/canvas.gpu'");
+    expect(errors).toContain("Import '@shaders/app/canvas.gpu' instead");
     stop();
     await (await running).finished;
   });

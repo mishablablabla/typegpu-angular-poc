@@ -26,6 +26,14 @@ export const MAIN = `import { wave } from '@shaders/wave.gpu';\nimport { state }
 /** A `'use gpu'` function the transform cannot handle (no position in the error, only the file). */
 export const BAD_SHADER = `${SHADER}\nexport const bad = (x: number) => {\n  'use gpu';\n  try {\n    return x;\n  } catch (e) {\n    return 0;\n  }\n};\n`;
 
+/** The fixture's `tsconfig.app.json` with more compiler options (`paths`, `baseUrl`, ...). */
+export const tsconfigWith = (extra: Record<string, unknown>, rest: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    compilerOptions: { target: 'ES2022', module: 'preserve', moduleResolution: 'bundler', skipLibCheck: true, isolatedModules: true, types: [], ...extra },
+    include: ['src/**/*.ts'],
+    ...rest,
+  });
+
 export type Project = ReturnType<typeof createProject>;
 
 export function createProject(files: Record<string, string> = {}) {
