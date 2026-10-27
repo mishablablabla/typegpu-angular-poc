@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain ES module without types
 import { buildShaders, checkShaders, ensureShaders } from '../../../../tools/typegpu-shaders/index.mjs';
+// @ts-expect-error plain ES module without types
+import { specifiersOf } from '../../../../tools/typegpu-shaders/graph.mjs';
 import { BAD_SHADER, createProject, posix, SHADER, tsconfigWith, type Project } from './project';
 
 type Problem = { code: string; message: string };
@@ -270,5 +272,114 @@ describe('check: a shader module imported through a tsconfig `paths` / `baseUrl`
     expect(result.fixed).toBe(1);
     expect(project.read('src/app/canvas.ts')).toBe(`import { wave } from '@shaders/app/wave.gpu';\nimport { state } from "@shaders/model";\nexport const c = [wave, state];\n`);
     expect(aliased(project)).toEqual([]);
+  });
+});
+
+describe('import-looking text that is not an import is not an import (B3: TypeScript\'s own scanner decides)', () => {
+  const stray = (project: Project) => check(project).problems.filter((p) => p.code === 'stray');
+  const TEXT = [
+    `const a = "import x from '../wave.gpu'"; // import y from '../wave.gpu'`,
+    'const b = `import z from "../wave.gpu"`;',
+    `const c = /'/.test("it's"); // from '../wave.gpu'`,
+    'export const all = [a, b, c];',
+  ].join('\n');
+
+  it('a string, a template literal and a comment after code are not reported; a real import after such a line still is', () => {
+    project.write('src/app/text.ts', TEXT);
+    expect(stray(project)).toHaveLength(0);
+    project.write('src/app/text.ts', `const a = "x"; // note\nimport { wave } from '../wave.gpu';\nexport const all = [a, wave];\n`);
+    expect(stray(project)).toHaveLength(1);
+  });
+
+  it('the positions are those of the specifier text, so --fix-imports rewrites exactly it (also next to a string that looks like an import)', () => {
+    project.write('src/app/text.ts', `const a = "import x from '../wave.gpu'";\nimport { wave } from "../wave.gpu";\nexport const all = [a, wave];\n`);
+    expect(check(project, true).fixed).toBe(1);
+    expect(project.read('src/app/text.ts')).toBe(`const a = "import x from '../wave.gpu'";\nimport { wave } from "@shaders/wave.gpu";\nexport const all = [a, wave];\n`);
+  });
+
+  it('without TypeScript in the project the expression is used: the same imports are found (check needs no TypeScript), a string is then still taken for one', async () => {
+    // a project of its own that never resolved TypeScript (Node keeps lookups it has made, even for a folder that was removed since)
+    const bare = createProject();
+    try {
+      const modules = bare.path('node_modules');
+      const lib = join(__dirname, '../../../../node_modules');
+      rmSync(modules);
+      mkdirSync(modules);
+      for (const entry of readdirSync(lib)) if (!entry.startsWith('.') && entry !== 'typescript') symlinkSync(join(lib, entry), join(modules, entry), 'junction');
+      const imported = `import { wave } from '../wave.gpu';\nexport const all = [wave];\n`;
+      const text = `const a = "import x from '../wave.gpu'";\nexport const b = a;\n`;
+      expect(specifiersOf(imported, bare.root).map((s: { spec: string }) => s.spec)).toEqual(['../wave.gpu']);
+      expect(specifiersOf(text, bare.root)).toHaveLength(1); // the documented limit of the fallback: without a scanner a string that looks like an import is one
+      expect(specifiersOf(text, project.root)).toHaveLength(0); // with TypeScript it is not
+      expect(specifiersOf(`import { K } from "./it's";\nimport { H } from './say "hi"';`, bare.root).map((s: { spec: string }) => s.spec)).toEqual(["./it's", './say "hi"']); // a quote of the other kind inside the name
+      bare.write('src/app/real.ts', imported);
+      const result = checkShaders({ root: bare.root }) as { problems: Problem[] };
+      expect(result.problems.filter((p) => p.code === 'stray')).toHaveLength(1);
+    } finally {
+      bare.dispose();
+    }
+  });
+});
+
+describe("a module whose file name has a quote or a '#' in it (C9)", () => {
+  it('is part of the closure, built, and followed: a change in it makes the output stale', async () => {
+    project.write("src/it's.ts", 'export const K = 1;\n');
+    project.write('src/h#sh.ts', 'export const H = 2;\n');
+    project.write('src/wave.gpu.ts', `import { K } from "./it's";\nimport { H } from './h#sh';\n${SHADER}\nexport const both = K + H;\n`);
+    const result = await buildShaders({ root: project.root });
+    expect(result.ok).toBe(true);
+    expect(project.exists("shaders-dist/it's.js")).toBe(true);
+    expect(project.exists('shaders-dist/h#sh.js')).toBe(true);
+    expect(check(project).ok).toBe(true);
+    project.write('src/h#sh.ts', 'export const H = 3;\n');
+    expect(codes(project)).toContain('stale');
+  });
+
+  it('is a stray import when the application imports it by a relative path', async () => {
+    project.write('src/h#sh.ts', 'export const H = 2;\n');
+    project.write('src/wave.gpu.ts', `import { H } from './h#sh';\n${SHADER}\nexport const h = H;\n`);
+    await buildShaders({ root: project.root });
+    project.write('src/app/use.ts', `import { H } from '../h#sh';\nexport const x = H;\n`);
+    expect(codes(project)).toContain('stray');
+    project.write('src/app/use.ts', `import raw from '../wave.gpu.ts?raw';\nexport const x = raw;\n`); // control: the data import is still not one
+    expect(codes(project)).not.toContain('stray');
+  });
+});
+
+describe('a shader module that imports another through the shader alias (B5: TS7016 or TS5055, whichever the state of the output folder produces)', () => {
+  const nestedImport = () => project.write('src/other.gpu.ts', `${SHADER}\nexport { wave as again } from '@shaders/wave.gpu';\n`);
+
+  it('check reports it with the relative path to use, in every state of the output', async () => {
+    nestedImport();
+    for (const state of ['before the first build', 'after it']) {
+      if (state === 'before the first build') project.remove('shaders-dist');
+      else await buildShaders({ root: project.root }).catch(() => undefined);
+      const found = check(project).problems.filter((p) => p.code === 'nested');
+      expect(found, state).toHaveLength(1);
+      expect(posix(found[0]!.message)).toContain('src/other.gpu.ts');
+      expect(found[0]!.message).toContain("'@shaders/wave.gpu'");
+      expect(found[0]!.message).toContain("Import './wave.gpu' instead");
+    }
+  });
+
+  it('ensure refuses it before any build (nothing is written), naming the same path; the fix makes it pass', async () => {
+    project.remove('shaders-dist');
+    nestedImport();
+    const result = await ensureShaders({ root: project.root });
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.map((d: { text: string }) => d.text).join('\n')).toContain("Import './wave.gpu' instead");
+    expect(project.exists('shaders-dist')).toBe(false);
+    project.write('src/other.gpu.ts', `${SHADER}\nexport { wave as again } from './wave.gpu';\n`);
+    expect(await ensureShaders({ root: project.root })).toMatchObject({ ok: true });
+  });
+
+  it('the path is relative to the importing file (a shader in a subfolder importing a module of the folder above)', () => {
+    project.write('src/app/deep.gpu.ts', SHADER.replace("'./model'", "'../model'") + `\nexport { state } from '@shaders/model';\n`);
+    const message = check(project).problems.find((p) => p.code === 'nested')!.message;
+    expect(message).toContain("Import '../model' instead");
+  });
+
+  it('application code importing through the alias is not nested (that is the way it is meant to be imported)', () => {
+    expect(check(project).problems.map((p) => p.code)).not.toContain('nested');
   });
 });
