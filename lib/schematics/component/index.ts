@@ -12,7 +12,7 @@ import {
   strings,
   url,
 } from '@angular-devkit/schematics';
-import { readWorkspace } from '@schematics/angular/utility';
+import { type ProjectDefinition, readWorkspace } from '@schematics/angular/utility';
 import { parseName } from '@schematics/angular/utility/parse-name';
 import { validateClassName, validateHtmlSelector } from '@schematics/angular/utility/validation';
 import { buildDefaultPath } from '@schematics/angular/utility/workspace';
@@ -68,11 +68,13 @@ export function component(options: ComponentOptions): Rule {
       shaderImport = `@shaders/${inside}`;
     }
 
+    const zoneless = !usesZoneJs(project);
+
     return chain([
       mergeWith(
         apply(url('./files'), [
           options.skipTests ? filter((path) => !path.endsWith('.spec.ts.template')) : noop(),
-          applyTemplates({ ...strings, name, classifiedName, selector, shaderImport, packageName: PACKAGE_NAME }),
+          applyTemplates({ ...strings, name, classifiedName, selector, shaderImport, zoneless, packageName: PACKAGE_NAME }),
           move(parsed.path),
         ]),
       ),
@@ -83,6 +85,21 @@ export function component(options: ComponentOptions): Rule {
       },
     ]);
   };
+}
+
+/**
+ * Does the project load zone.js (a `zone.js` entry in the polyfills of the build target, one of its configurations, or the test target)?
+ * Angular 20's TestBed fails a project without it with NG0908 unless the spec provides `provideZonelessChangeDetection()`, so the generated
+ * spec provides it exactly when zone.js is not there. Not finding zone.js is the safe default: a zoneless spec also runs in a zone.js project.
+ */
+function usesZoneJs(project: ProjectDefinition): boolean {
+  const lists: unknown[] = [];
+  for (const name of ['build', 'test']) {
+    const target = project.targets.get(name);
+    lists.push(target?.options?.['polyfills']);
+    for (const configuration of Object.values(target?.configurations ?? {})) lists.push(configuration?.['polyfills']);
+  }
+  return lists.some((polyfills) => (Array.isArray(polyfills) ? polyfills : [polyfills]).some((entry) => typeof entry === 'string' && /^zone\.js(\/|$)/.test(entry)));
 }
 
 const SELECTOR_SAFE = /^[a-z][a-z0-9-]*$/;

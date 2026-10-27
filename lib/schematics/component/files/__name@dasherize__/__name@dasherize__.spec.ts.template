@@ -1,4 +1,4 @@
-import { ErrorHandler } from '@angular/core';
+import { ErrorHandler<% if (zoneless) { %>, provideZonelessChangeDetection<% } %> } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideTypeGpu } from '<%= packageName %>';
 import { createFakeTypeGpu, installManualAnimationFrames } from '<%= packageName %>/testing';
@@ -15,7 +15,7 @@ describe('<%= classifiedName %>', () => {
     });
     const frames = installManualAnimationFrames();
     try {
-      TestBed.configureTestingModule({ providers: [provideTypeGpu({ root: fake.root })] });
+      TestBed.configureTestingModule({ providers: [<% if (zoneless) { %>provideZonelessChangeDetection(), <% } %>provideTypeGpu({ root: fake.root })] });
       const fixture = TestBed.createComponent(<%= classifiedName %>);
       fixture.detectChanges(); // zone-based test beds do not run change detection on their own
       await fixture.whenStable();
@@ -37,7 +37,8 @@ describe('<%= classifiedName %>', () => {
     // A failing factory behaves the same in jsdom and in a real browser, with or without WebGPU.
     TestBed.configureTestingModule({
       providers: [
-        provideTypeGpu({ createRoot: () => Promise.reject(new Error('no adapter')) }),
+<% if (zoneless) { %>        provideZonelessChangeDetection(),
+<% } %>        provideTypeGpu({ createRoot: () => Promise.reject(new Error('no adapter')) }),
         { provide: ErrorHandler, useValue: { handleError: () => undefined } },
       ],
     });

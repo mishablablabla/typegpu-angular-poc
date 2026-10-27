@@ -259,3 +259,51 @@ describe('component: in a project set up with `ng add --shaders prebuild`', () =
     await expect(generate(await workspaceWith(), { name: 'my-canvas' })).rejects.toThrow(/--shaders prebuild/);
   });
 });
+
+describe('component: the generated spec in a project with and without zone.js (F-L7: NG0908 under Angular 20 --zoneless, 2 of 4 specs failed)', () => {
+  const specOf = async (edit?: (json: Record<string, any>) => void, mode: 'plugin' | 'prebuild' = 'plugin') => {
+    const tree = mode === 'plugin' ? await configured() : await ours().runSchematic('ng-add', { shaders: 'prebuild' }, await workspaceWith());
+    if (edit) editJson(tree, 'angular.json', edit);
+    return (await generate(tree, { name: 'my-canvas' })).readText('/src/app/my-canvas/my-canvas.spec.ts');
+  };
+  const PROVIDER = /provideZonelessChangeDetection\(\)/g;
+
+  it('a project without zone.js provides zoneless change detection in both specs, and imports it', async () => {
+    for (const mode of ['plugin', 'prebuild'] as const) {
+      const spec = await specOf(undefined, mode);
+      expect(spec, mode).toContain("import { ErrorHandler, provideZonelessChangeDetection } from '@angular/core';");
+      expect(spec.match(PROVIDER), mode).toHaveLength(2); // one per spec; the import names it without the call
+      expect(spec, mode).toContain('providers: [provideZonelessChangeDetection(), provideTypeGpu({ root: fake.root })]');
+      expect(spec, mode).not.toContain('<%'); // every template tag was expanded
+    }
+  });
+
+  it('a project that loads zone.js (build polyfills, a build configuration, or the test target) does not', async () => {
+    const zoneJs: [string, (json: Record<string, any>) => void][] = [
+      ['build options', (json) => (json.projects.app.architect.build.options.polyfills = ['zone.js'])],
+      ['a build configuration', (json) => (json.projects.app.architect.build.configurations.development.polyfills = ['zone.js'])],
+      ['the test target', (json) => (json.projects.app.architect.test.options = { ...json.projects.app.architect.test.options, polyfills: ['zone.js', 'zone.js/testing'] })],
+    ];
+    for (const [where, edit] of zoneJs) {
+      const spec = await specOf(edit);
+      expect(spec, where).not.toContain('provideZonelessChangeDetection');
+      expect(spec, where).toContain("import { ErrorHandler } from '@angular/core';");
+      expect(spec, where).toContain('providers: [provideTypeGpu({ root: fake.root })]');
+    }
+  });
+
+  it('other polyfills do not count as zone.js, and a polyfills option given as a string is read too', async () => {
+    expect(await specOf((json) => (json.projects.app.architect.build.options.polyfills = ['./src/polyfills.ts', 'zone.js-fake']))).toContain('provideZonelessChangeDetection()');
+    expect(await specOf((json) => (json.projects.app.architect.build.options.polyfills = 'zone.js'))).not.toContain('provideZonelessChangeDetection');
+  });
+
+  it('the spec of the failing GPU factory waits for what it asserts, not for whenStable() (zone.js returns from it too early: F-L3)', async () => {
+    for (const edit of [undefined, (json: Record<string, any>) => (json.projects.app.architect.build.options.polyfills = ['zone.js'])]) {
+      const spec = await specOf(edit);
+      const failing = spec.slice(spec.indexOf("it('offers a retry"));
+      expect(failing).toContain("for (let attempt = 0; attempt < 50 && !fixture.nativeElement.textContent.includes('GPU initialisation failed'); attempt++) {");
+      expect(failing).toContain('await new Promise((resolve) => setTimeout(resolve));');
+      expect(failing).not.toMatch(/await [\w.]*whenStable/); // the comment explaining why may name it
+    }
+  });
+});
