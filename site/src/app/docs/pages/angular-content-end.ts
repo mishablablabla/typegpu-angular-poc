@@ -189,7 +189,7 @@ export const ANGULAR_DOC_END: readonly DocBlock[] = [
   ul(
     'the unit and integration specs of the schematics, the wrapper builders and the <code>typegpu-shaders</code> tool (they run real processes and real files in temporary projects) and both typechecks, on <strong>Linux</strong> (Node 24 and 22.22.3) and <strong>Windows</strong> (Node 24);',
     'the package is packed once on Linux, its tarball contract is checked (every file the manifest, <code>collection.json</code> and <code>builders.json</code> point to exists, no specs or local paths, bin files executable), and that exact tarball is installed into a consumer app whose library specs, production build and shader bundle check run on Linux (Node 24 and 22.22.3) and Windows (Node 24);',
-    'jobs with the <strong>real Angular CLI</strong> on Linux (Node 24) from the same tarball: <code>ng new</code>, <code>ng add</code>, <code>ng generate</code>, builds, <code>ng test</code> and the shader bundle check on Angular 20, 21 and 22 in plugin mode, and the prebuild mode on Angular 22 (27 checks).',
+    'jobs with the <strong>real Angular CLI</strong> on Linux (Node 24) from the same tarball: <code>ng new</code>, <code>ng add</code>, <code>ng generate</code>, builds, <code>ng test</code> and the shader bundle check on Angular 20, 21 and 22 in plugin mode, and the prebuild mode on Angular 22 (28 checks).',
   ),
   p('What CI does <strong>not</strong> run was checked <strong>by hand on macOS</strong> (arm64):'),
   table(
