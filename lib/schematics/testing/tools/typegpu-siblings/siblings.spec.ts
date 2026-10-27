@@ -166,6 +166,15 @@ describe('a shader that fails', () => {
     expect(project.read('src/wave.gpu.generated.js')).toMatch(/status=ok/);
   });
 
+  it('the stub can be imported without a DOM (an SSR dev server): every export of the failed module is there and throws the message when used', async () => {
+    project.write('src/wave.gpu.ts', `${BROKEN}\nexport default 1;\n`);
+    await generate(config(), { stubs: true });
+    const stub = await project.import('src/wave.gpu.generated.js'); // evaluating it must not throw
+    expect(Object.keys(stub).sort()).toEqual(['bad', 'default', 'wave']);
+    expect(() => stub.wave(1)).toThrow(/try|TryStatement|Unsupported/i);
+    expect(() => stub.bad.x).toThrow();
+  });
+
   it('a stub left by a killed dev server fails the next plain run until the shader is fixed (it is not bundled as if fine)', async () => {
     project.write('src/wave.gpu.ts', BROKEN);
     await generate(config(), { stubs: true });
