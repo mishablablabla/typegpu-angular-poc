@@ -1,5 +1,8 @@
 # QA_PLAN.md — TypeGPU Angular integration (`@typegpu-poc/angular`)
 
+> **Round 2 (2026-10-27, production-readiness).** This plan is the contract and matrix of round 1. Round 2 re-checked the repository state, reconciled every finding (`QA_FINDINGS.md`), ran the supported workflows again from a clean state on Angular 20/21/22 in both modes (real CLI, browser rendering on Angular 22), audited tests (mutation checks, flake loops, isolation), security and Windows, fixed what was confirmed, and added CI (Linux and Windows unit/integration, package contract, app, real-CLI jobs). Its commands and results are appended to `QA_EXECUTION_LOG.md`; the final verdict is in `QA_FINAL_REPORT.md`.
+
+
 QA Lead plan. Status of the run is in `QA_EXECUTION_LOG.md`, defects in `QA_FINDINGS.md`, the verdict in `QA_FINAL_REPORT.md`.
 Package under test: the PACKED tarball built from the current worktree on 2026-10-26 (sha256 `d8d71d75997699017abb94a341715605057ea803a3ec28f820e1cafe99d7571a`, `@typegpu-poc/angular@0.0.1`, 50 entries). Environment: macOS arm64 (Darwin 25.3), Node 24.21.0, npm 11.19.0, pnpm 12.10.1, Chrome headless / an embedded Chromium with WebGPU.
 

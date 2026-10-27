@@ -9,7 +9,7 @@
       "type": "string",
       "enum": ["plugin", "prebuild"],
       "default": "plugin",
-      "description": "How 'use gpu' shaders are built. 'plugin': the esbuild plugin through the community custom-esbuild builders (angular.json is changed). 'prebuild': the typegpu-shaders command transforms them before Angular builds (angular.json is not changed; package.json scripts, tsconfig paths and dependencies are)."
+      "description": "How 'use gpu' shaders are built. 'plugin' (default): the esbuild plugin through the community custom-esbuild builders; the build, serve and test targets move to those builders. 'prebuild' (experimental): this package's wrapper builders run the typegpu-shaders tool before Angular's own builders; the build, serve and test targets (and an existing extract-i18n target) move to the wrapper builders, dependencies, a tsconfig '@shaders/*' path and a .gitignore line are added, no npm script is changed."
     },
     "project": {
       "type": "string",

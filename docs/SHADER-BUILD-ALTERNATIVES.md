@@ -1,7 +1,7 @@
 # Shader build: alternatives to `custom-esbuild` + namespaced plugin
 
 Date 2026-10-26, macOS arm64, Node 24.21. Angular 22.2 (`@angular/build` 22.2.4), typegpu 0.12.8, unplugin-typegpu 0.12.6, Vite 7.3.7, `@analogjs/vite-plugin-angular` 2.9.2.
-Everything is in `experiments/shader-alternatives/` (one folder per approach, shared `node_modules` symlink except C). Nothing was committed; the TypeGPU monorepo and the DevTools clone were not touched.
+The experiments of this first round lived in a local `experiments/shader-alternatives/` folder that is **not part of this repository** (the text below is the record of them). Approach I became the prebuild mode (`ng add --shaders prebuild`, see `SHADER-PREBUILD-POC.md` for its history and `lib/README.md` for what it is now).
 Labels: **VERIFIED** (run here), **REPORTED** (research agent read a page, not re-checked), **UNVERIFIED**.
 
 ## The problem
@@ -38,3 +38,22 @@ Details worth knowing:
 Karma, SSR with prebuilt shaders, pnpm/Yarn PnP, Windows/Linux, Angular 20/21, `ng add` wiring for I, B/H with Web Workers, HMR beyond full reload, Analog tests and SSR.
 
 See also: `SHADER-PREBUILD-POC.md` (approach I run on the real showcase, with results and a recommendation).
+
+
+## Round 2 (2026-10-27): the hybrid "per-file sibling generation", prototyped and measured
+
+**Idea** (from an architecture study): keep the thin wrapper builders and the option-schema copies (nothing wrapper-free can guarantee freshness: Angular's Architect has no `dependsOn`, `concat` drops flags, the CLI never runs package.json scripts), but replace the tool core by a generated file **next to each shader**: `x.gpu.ts` gets `x.gpu.generated.js` (header with the source hash and a status) and a facade `x.gpu.generated.d.ts` (`export * from './x.gpu'`). No output folder, no manifest, no session registry, no prune, no tsconfig `paths` edit; freshness is a stateless `verify()` before and after the official builder.
+
+**Prototype:** built for real in a sandbox clone (a second tool `typegpu-siblings`, a hidden `ng add --shaders=siblings`), run with real `ng` on Angular 22.2.4, 21.2.28 and 20.3.41, against the same scenario list as the QA state machine. It is kept, unmerged, on the branch `experiment/siblings-prototype`.
+
+| Question | Result (measured, macOS arm64, a loaded host: timings are not benchmark-grade) |
+|---|---|
+| Does TypeScript resolve `./x.gpu.generated` to the facade `.d.ts` on 20/21/22? | Yes (`--traceResolution`: `.ts` and `.tsx` missing, `.d.ts` used); `allowJs`/`checkJs` fine |
+| Does Angular's watcher rebuild when a neighbouring generated file is rewritten? | Yes on all three: edit to served value 0.25 to 0.45 s (the current design: 0.36 to 0.68 s) |
+| Hand-written lines, tool + wrappers (`wc -l`, specs and schemas excluded) | about 1040 against 2095 (**-50%**), but features were dropped: the CLI `run`/`dev` commands, `check --fix-imports`, own declaration emit |
+| Scenarios (invalid shader, SIGINT at 6 offsets, `kill -9`, concurrent builds, two dev servers, rename/delete, stale or hand-edited output, `ng build --watch`, `ng test --watch`, SSR dev server through a broken shader) | The same pass rate as the current design; no scenario where it was worse, except a different policy for an edit made during a build (the after-check refused 7 of 16 builds at a 180 ms edit cadence) |
+| Ergonomics | imports become `./x.gpu.generated`; helper modules that shaders import can be imported freely by application code (the current design reports them as stray); generated files sit next to the sources (editor excludes, `.gitignore` for the `.js`, commit the facade `.d.ts`) |
+| Prototype defects | case-only rename, a throwing stub taking down an Angular 21 SSR dev server (the same weak spot the current tool had, now fixed there too), `tgpu.fn(...)` in a plain module not flagged, config lookup in multi-project workspaces; **one unexplained** `verify` failure in 1 of 15 rapid-edit runs |
+| Not verified | Windows, Linux, pnpm/PnP, libraries (ng-packagr), `extract-i18n`, real browser rendering of the siblings |
+
+**Decision: not adopted for now.** The measured gain is simplicity (half the code, no state to get out of sync), not a better outcome on any scenario; the cost is a migration of every user's imports, a larger safety surface (a generator that writes next to the sources), dropped features, an unexplained failure, and no Windows or Linux evidence, while the current design has been hardened by two QA rounds, runs in CI on Linux and Windows, and now has every defect that the siblings prototype also exposed (SSR stub) fixed. **What would change the decision:** a library user who wants generated files in source control, a second Windows/Linux evidence round for the prototype, and the unexplained `verify` failure explained. The conditions the prototype's author named for adopting it: commit the facade `.d.ts` and ignore only the generated `.js`; port the SSR-safe stub (done in the current tool); fold the mode into the existing wrapper schemas; decide the after-check policy; a codemod from `@shaders/...`; document the `*.gpu.ts` naming rule; Windows and Linux CI.

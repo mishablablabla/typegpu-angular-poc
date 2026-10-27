@@ -1,5 +1,8 @@
 # Shader prebuild: proof of concept on the real showcase
 
+> **Historical log (2026-10-26).** This file records how the prebuild was built and what was measured at each step; several statements in it are outdated: the experiments folder it refers to is not part of this repository, test counts and "not run" lists were superseded by two QA rounds and by CI (Linux and Windows unit and integration specs, real Angular CLI runs), `ng add` wiring and `extract-i18n` wrapping exist now, and `ng generate` works in a prebuild project. For the current behaviour read `lib/README.md` ("Shader prebuild"), for decisions `DECISIONS.md` (D10-D12), for known findings `../QA_FINDINGS.md`.
+
+
 Date 2026-10-26, macOS arm64, Node 24.21, Angular 22.2 (`@angular/build` 22.2.4), typegpu 0.12.8, unplugin-typegpu 0.12.6.
 Follow-up to `SHADER-BUILD-ALTERNATIVES.md` (approach I). Labels: **VERIFIED** (run here, result observed), **NOT VERIFIED** (not run), **HYPOTHESIS**.
 All work is in `experiments/shader-alternatives/`. Nothing was committed or pushed; the TypeGPU monorepo (HEAD bec5d554), `site/`, `lib/` and `app-ssr/` were not modified (baseline builds went to a scratch output path).
