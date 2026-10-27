@@ -69,7 +69,7 @@ describe('watch', () => {
     const result = await nextBuild(() => project.write('src/wave.gpu.ts', BAD_SHADER));
     expect(result.ok).toBe(false);
     expect(result.diagnostics[0]).toMatchObject({ text: expect.stringContaining('TryStatement') });
-    expect(posix(result.diagnostics[0].file)).toBe('src/wave.gpu.ts');
+    expect(posix(result.diagnostics[0].file!)).toBe('src/wave.gpu.ts');
     const stub = project.read('shaders-dist/wave.gpu.js');
     expect(stub).toContain('typegpu-shaders-error'); // the banner element
     expect(stub).toMatch(/src(\/|\\+)wave\.gpu\.ts/); // a JS string literal: the Windows separator is escaped
@@ -174,7 +174,7 @@ describe('watch', () => {
     await start();
     const result = await nextBuild(() => project.write('src/model.ts', 'export const SCALE = ;\n'));
     expect(result.ok).toBe(false);
-    expect(posix(result.diagnostics.find((d) => d.source === 'syntax')!.file)).toBe('src/model.ts');
+    expect(posix(result.diagnostics.find((d) => d.source === 'syntax')!.file!)).toBe('src/model.ts');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await inPage(() => expect(project.import('shaders-dist/model.js')).rejects.toThrow(/src[\\/]model.ts/));

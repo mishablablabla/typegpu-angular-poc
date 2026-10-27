@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { insideOut } from '../../../../tools/typegpu-shaders/atomic.mjs';
 // @ts-expect-error plain ES module without types
 import { buildShaders, resolveConfig } from '../../../../tools/typegpu-shaders/index.mjs';
+// @ts-expect-error plain ES module without types
+import { generatedOf } from '../../../../tools/typegpu-shaders/manifest.mjs';
+// @ts-expect-error plain ES module without types
+import { listTs } from '../../../../tools/typegpu-shaders/graph.mjs';
 import { createProject, type Project } from './project';
 
 let project: Project;
@@ -105,5 +109,48 @@ describe('the output folder itself', () => {
     link(project.root, join(project.root, 'self'));
     expect(() => resolveConfig({ root: project.root, out: 'self' })).toThrow(/out/);
     expect(existsSync(join(project.root, 'src'))).toBe(true);
+  });
+});
+
+describe('review findings (round 2)', () => {
+  it('a refusal for a module outside src does not forget what an earlier build listed: a deleted shader is still pruned afterwards', async () => {
+    project.write('src/b.gpu.ts', 'export const b = 1;\n');
+    expect((await buildShaders({ root: project.root })).ok).toBe(true);
+    expect(project.exists('shaders-dist/b.gpu.js')).toBe(true);
+    project.remove('src/b.gpu.ts');
+    project.write('outside.ts', 'export const OUT = 1;\n');
+    const original = project.read('src/wave.gpu.ts');
+    project.write('src/wave.gpu.ts', `import { OUT } from '../outside';\n${original}\nexport const o = OUT;\n`);
+    expect((await buildShaders({ root: project.root })).ok).toBe(false); // refused: a module outside the source folder
+    project.write('src/wave.gpu.ts', original);
+    expect((await buildShaders({ root: project.root })).ok).toBe(true);
+    expect(project.exists('shaders-dist/b.gpu.js')).toBe(false); // before the fix: left behind, importable and bundled stale
+  });
+
+  it('a dangling link and a link back to a parent folder under src do not stop a build', async () => {
+    mkdirSync(join(project.root, 'src', 'app'), { recursive: true });
+    link(join(project.root, 'src'), join(project.root, 'src', 'app', 'loop')); // a loop
+    try {
+      symlinkSync('nowhere.ts', join(project.root, 'src', 'app', '.#x.ts')); // an editor's lock file
+    } catch {
+      /* creating a file link needs a privilege on Windows: the loop alone is then what is tested */
+    }
+    const found = listTs(join(project.root, 'src'));
+    expect(found.length).toBeGreaterThan(0); // before: ENOENT or ELOOP
+    expect(found.filter((file: string) => file.includes('loop'))).toEqual([]); // nothing is listed again through the loop
+    expect((await buildShaders({ root: project.root })).ok).toBe(true);
+  });
+
+  it('a link in the way gets no folder created behind it', async () => {
+    project.write('src/sub/deeper/x.gpu.ts', 'export const x = 1;\n');
+    mkdirSync(join(project.root, 'shaders-dist'));
+    link(victims, join(project.root, 'shaders-dist', 'sub'));
+    const result = await buildShaders({ root: project.root });
+    expect(result.ok).toBe(false);
+    expect(readdirSync(victims).sort()).toEqual(['a.js', 'b.js', 'keep.txt']); // before: an empty `deeper` was created in the victims folder
+  });
+
+  it('manifest names with a colon (a drive, an NTFS stream) are not names of generated files', () => {
+    expect(generatedOf({ generated: ['a:b.js', 'C:x.js', 'ok.js', 'sub/ok.d.ts'] })).toEqual(['ok.js', 'sub/ok.d.ts']);
   });
 });

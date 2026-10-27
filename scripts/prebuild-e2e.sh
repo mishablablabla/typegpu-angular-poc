@@ -92,6 +92,7 @@ run "8  a shader that cannot be transformed fails ng build" 1 npx ng build
 said "8b ...naming the file" "my-canvas.gpu.ts"
 # shellcheck disable=SC2086 # (a list of flags, as above)
 run "9  ... and ng test" 1 npx ng test --watch=false ${E2E_TEST_ARGS:-}
+said "9b ...naming the file" "my-canvas.gpu.ts"
 restore
 
 edit src/app/my-canvas/my-canvas.ts 's.replace("@shaders/app/my-canvas/my-canvas.gpu","./my-canvas.gpu")'

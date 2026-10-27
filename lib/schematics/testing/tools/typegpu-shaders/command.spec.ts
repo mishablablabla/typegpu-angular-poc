@@ -66,7 +66,7 @@ describe('the environment of the command', () => {
   it('on Windows keeps the one PATH variable under the name it has (Path), and never leaves two spellings', () => {
     const env = withBinPath({ Path: 'C:\\Windows', PATH: 'C:\\other', ComSpec: 'C:\\Windows\\System32\\cmd.exe' }, 'C:\\p', 'win32');
     expect(Object.keys(env).filter((key) => key.toUpperCase() === 'PATH')).toHaveLength(1);
-    const value = Object.entries(env).find(([key]) => key.toUpperCase() === 'PATH')![1];
+    const value = String(Object.entries(env).find(([key]) => key.toUpperCase() === 'PATH')![1]);
     expect(value.startsWith('C:\\p\\node_modules\\.bin;C:\\node_modules\\.bin;')).toBe(true);
     expect(withBinPath({}, '/p', 'linux')['PATH']).toBe('/p/node_modules/.bin:/node_modules/.bin'); // no trailing separator (it would mean "the current folder")
   });

@@ -116,16 +116,17 @@ Environment: macOS arm64 (Darwin 25.3), Node 24.21.0, npm 11.19.0, pnpm 12.10.x,
 | e22 / e2021 | real `ng` workflows on Angular 22.2.4 / 21.2.28 / 20.3.41, both modes | tables of ~25 scenarios each (build, test, serve + edit/break/recover, SSR, hydration, workers, extract-i18n, idempotency, refusals, concurrency, kill, pnpm); WebGPU rendering verified in headless Chrome on Metal for Angular 22 (production, `ng serve`, SSR server); defects found: SSR dev server bricked by the throwing stub (X1), `extract-i18n` (F-L5), alias detection (B2), Angular 20 SSR `security` (F-L2), papercuts |
 | Security | destructive operations, injection, supply chain | S1-S6 (see findings), proofs by crafted inputs; npm audit: 0 production vulnerabilities in `lib/` and the apps, 2 dev-server advisories in the Vite nested in `@angular/build` 22.2.x (dev only; wait for an Angular release) |
 | Implementation lanes | stub, i18n, alias, addux, winhard, port, port2 | each in its own clone, regression tests, mutation checks, real-CLI verification; merged by cherry-pick, conflicts resolved by the lead |
+| Independent final review | the whole round 2 diff by a reviewer with no briefing; 56 mutants; ran the suite 5x incl. concurrent and shuffled; 22 documentation claims checked | no high-severity defect; 4 real tool bugs (R1-R4), a guard bypass in a script (R5), weak tests and an untyped spec tree (R6-R8), documentation drift: all fixed with regression tests (mutation-checked) except R9/R10, accepted and listed in `QA_FINDINGS.md` |
 | Hybrid experiment | sibling generation prototype | measured and compared (`docs/SHADER-BUILD-ALTERNATIVES.md`, Round 2); not adopted; prototype on `experiment/siblings-prototype` |
 
 ## Verification at the final commit
 | What | Where | Result |
 |---|---|---|
-| `lib`: `npm ci`, both typechecks, `npm run test:schematics` | GitHub Actions: Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24 (run 40436990834 at `7f5a520`) | 22 files: Ubuntu 614 passed + 8 skipped (622), Windows 615 passed + 9 skipped (624) |
+| `lib`: `npm ci`, both typechecks, `npm run test:schematics` | GitHub Actions: Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24 (run 40439829661 at `edf7d09`, after the independent review's fixes) | 22 files: Ubuntu 619 passed + 8 skipped (627), Windows 620 passed + 9 skipped (629) |
 | `pack` + `scripts/verify-package.mjs` | Ubuntu | passed; tarball uploaded and reused by the other jobs |
 | `app`: `npm ci`, `npm install --no-save <tarball>`, installed copy equals the tarball, `ng test`, `ng build`, bundle check | Ubuntu Node 24 and 22.22.3, Windows Node 24 | 13 files, 166 passed each; build and check passed |
 | acceptance (`ng new`, `ng add`, `ng generate`, builds, `ng test`, bundle check, plugin mode) | Ubuntu Node 24, Angular 20, 21, 22 | passed |
-| `prebuild-e2e` (27 checks, real CLI, prebuild mode) | Ubuntu Node 24, Angular 22 | all 27 passed |
+| `prebuild-e2e` (28 checks, real CLI, prebuild mode) | Ubuntu Node 24, Angular 22 | all 28 passed |
 | `lib` suite, flake loops, leak guard | macOS (6 of 6 full runs, two concurrent suites for 3 rounds; five specs 15 of 15) and a Linux container (487 passed, 10 skipped as root) | passed; the run fails if a spec leaves a temporary folder |
 | Real-`ng` scenarios (serve, kill -9, concurrency, SSR, browser rendering) | macOS only, by hand/harness | see the lane tables above; state machine 48 of 48 on Angular 22.2.4 |
 

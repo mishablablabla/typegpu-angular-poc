@@ -562,8 +562,9 @@ describe('ng add: files with Windows line endings (CRLF)', () => {
     expect(after.readText('package.json')).toContain('"files": ["dist", "README.md"]'); // not reformatted
     expect(after.readText('package.json')).toMatch(/^\{\r\n {2}"/);
     expect(readJson(after, 'package.json').dependencies.typegpu).toBe('^0.12.8');
-    if (!options.shaders) expect(readJson(after, 'package.json').scripts['check:shaders']).toContain('check-shader-bundle');
-    expect(readJson(after, 'angular.json').projects.app.architect.build.builder).toContain(options.shaders ? 'typegpu-poc' : 'custom-esbuild');
+    const prebuild = 'shaders' in options;
+    if (!prebuild) expect(readJson(after, 'package.json').scripts['check:shaders']).toContain('check-shader-bundle');
+    expect(readJson(after, 'angular.json').projects.app.architect.build.builder).toContain(prebuild ? 'typegpu-poc' : 'custom-esbuild');
   });
 
   it('is byte-identical on the second run', async () => {
