@@ -1,7 +1,7 @@
 // The file watcher itself: what it ignores (a sibling folder is not the output folder), and what happens when it fails (Windows raises
 // EPERM on the watcher when the watched folder is removed or renamed; an unhandled 'error' event would end the Angular process).
 import { EventEmitter } from 'node:events';
-import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error plain ES module without types
@@ -53,12 +53,22 @@ describe('a sibling folder of the output folder is not the output folder', () =>
     project.write('src/generated-old/dep.ts', 'export const DEP = 1;\n');
     project.write('src/wave.gpu.ts', `import { DEP } from './generated-old/dep';\n${SHADER}\nexport const dep = DEP;\n`);
     const results: Result[] = [];
-    watcher = watchShaders({ root: project.root, out: 'src/generated' }, { onBuild: (result: Result) => results.push(result) });
+    const seen: string[] = []; // what the operating system reported: the failure message must say whether the event never came or was ignored
+    const watchLogged = (dir: string, options: object, listener: Listener) => fsWatch(dir, options, (event, filename) => {
+      seen.push(`${event}:${filename}`);
+      listener(event, filename as string);
+    });
+    watcher = watchShaders({ root: project.root, out: 'src/generated' }, { onBuild: (result: Result) => results.push(result) }, { watch: watchLogged });
     await watcher!.ready;
     expect(results[0]).toMatchObject({ ok: true });
     expect(project.read('src/generated/generated-old/dep.js')).toContain('DEP = 1');
+    seen.length = 0;
     project.write('src/generated-old/dep.ts', 'export const DEP = 2;\n');
-    await waitFor(() => project.read('src/generated/generated-old/dep.js').includes('DEP = 2'), 'the rebuild after an edit next to the output folder');
+    try {
+      await waitFor(() => project.read('src/generated/generated-old/dep.js').includes('DEP = 2'), 'the rebuild after an edit next to the output folder');
+    } catch (error) {
+      throw new Error(`${(error as Error).message}; events after the edit: ${JSON.stringify(seen)}; builds: ${results.length}; last result: ${JSON.stringify(results.at(-1))}`);
+    }
   });
 });
 
