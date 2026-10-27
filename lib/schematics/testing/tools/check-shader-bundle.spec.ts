@@ -169,6 +169,40 @@ describe('check-shader-bundle: what it counts', () => {
   });
 });
 
+describe('check-shader-bundle: the list of possible causes (C12: removing the tsconfig `paths` line failed no test)', () => {
+  it('names every way a directive stays untransformed, so the person reading the failure can tell which applies', () => {
+    put('out/main.js', UNTRANSFORMED);
+    const { code, err } = run('out');
+    expect(code).toBe(1);
+    expect(err).toContain('Possible causes:');
+    expect(err).toContain('build.options.plugins and configurations[*].plugins'); // the plugin is not configured
+    expect(err).toContain('is not named *.gpu.ts'); // the module name
+    expect(err).toContain('imports a shader module by a relative path instead of \'@shaders/...\''); // prebuild, relative
+    expect(err).toContain('typegpu-shaders check');
+    expect(err).toContain('through a tsconfig `paths` alias or a `baseUrl` path other than \'@shaders/...\''); // prebuild, tsconfig alias
+    expect(err).toContain('Web Worker');
+  });
+
+  it('is not printed when everything is transformed', () => {
+    put('out/main.js', TRANSFORMED);
+    expect(run('out').err).not.toContain('Possible causes');
+  });
+});
+
+describe('check-shader-bundle: a string at the start of a block is not a directive (B8)', () => {
+  it('an `if` block, a bare block and a loop body next to a transformed function pass; a real untransformed function in the same file still fails', () => {
+    const noise = "if (x) { 'use gpu'; }\n{ 'use gpu'; }\nfor (;;) { \"use gpu\" }\ntry { 'use gpu' } catch { 'use gpu' }\n";
+    put('out/main.js', noise + TRANSFORMED);
+    const ok = run('out');
+    expect(ok.code, ok.err).toBe(0);
+    expect(ok.out).toMatch(/ok: 1 'use gpu' directive\(s\)/);
+    put('out/main.js', noise + UNTRANSFORMED);
+    const bad = run('out');
+    expect(bad.code).toBe(1);
+    expect(bad.err).toMatch(/1 of 1 'use gpu' directive\(s\) were not transformed/);
+  });
+});
+
 describe('check-shader-bundle: real transformed output', () => {
   it('passes on the @typegpu/noise dist (the parenthesised `$.f = (function ...` wrapper) and on esbuild output of unplugin-typegpu', () => {
     cpSync(join(FIXTURES, 'transformed'), join(dir, 'transformed'), { recursive: true });

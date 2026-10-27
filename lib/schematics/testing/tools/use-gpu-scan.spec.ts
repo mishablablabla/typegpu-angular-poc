@@ -58,6 +58,62 @@ describe('use-gpu-scan: what is a directive', () => {
   });
 });
 
+describe('use-gpu-scan: a string at the start of a block is not a directive (B8: `if (x) { \'use gpu\'; }` made check-shader-bundle exit 1)', () => {
+  it('blocks of if, for, while, switch, else, try, catch, finally, do, case, a label and a bare block', () => {
+    const blocks = [
+      `function f(x) { if (x) { 'use gpu'; return 1; } }`,
+      `if (a) {} else { "use gpu" }`,
+      `if (a) { 1 } else if (b) { 'use gpu' }`,
+      `function f() { for (;;) { "use gpu" } }`,
+      `for (const x of xs) { 'use gpu'; }`,
+      `while (go()) { 'use gpu'; }`,
+      `switch (x) { case 1: { 'use gpu'; } }`,
+      `try { 'use gpu'; } catch (e) { "use gpu" } finally { 'use gpu' }`,
+      `try {} catch { "use gpu" }`,
+      `do { 'use gpu'; } while (x);`,
+      `outer: { 'use gpu'; }`,
+      `function f() { { 'use gpu'; } }`,
+      `{ 'use gpu'; }`,
+      `a(); { "use gpu" }`,
+      `if (a) { b(); }\n{ 'use gpu'; }`, // a block after a block
+    ];
+    for (const source of blocks) expect(scan(source), source).toHaveLength(0);
+  });
+
+  it('a condition that contains calls and parentheses is still a condition', () => {
+    expect(scan(`if (check(a, (b))) { 'use gpu'; }`)).toHaveLength(0);
+    expect(scan(`if (x)\n{\n  'use gpu';\n}`)).toHaveLength(0);
+  });
+
+  it('function bodies still are: function, method, arrow with and without parentheses, async, generator, with TypeScript annotations', () => {
+    const functions = [
+      `function g() { "use gpu"; }`,
+      `const f = function () { 'use gpu'; };`,
+      `class A { m() { "use gpu"; } }`,
+      `class A { static s() { 'use gpu' } }`,
+      `class A { get v() { "use gpu"; return 1; } }`,
+      `const o = { m() { 'use gpu'; } };`,
+      `const a = (x) => { "use gpu"; return x; };`,
+      `const b = x => { "use gpu" };`,
+      `const c = async () => { "use gpu" };`,
+      `async function* h() { 'use gpu'; }`,
+      `function t(x: number): number { 'use gpu'; return x; }`,
+      `const u = (x: number): number => { "use gpu"; return x; };`,
+      `function v<T>(x: T): T { 'use gpu'; return x; }`,
+      `function w(): { a: number } { 'use gpu'; return { a: 1 }; }`, // the `}` of a type literal is not a block's
+      `const z = (): { a: { b: number } } => { 'use gpu'; return { a: { b: 1 } }; };`,
+      `class B { m(x: number): void { 'use gpu'; } }`,
+      `if (x) { const f = () => { 'use gpu'; }; }`,
+    ];
+    for (const source of functions) expect(scan(source), source).toHaveLength(1);
+  });
+
+  it('a function inside a block keeps its directive, and a block inside a function does not get one', () => {
+    expect(scan(`function f() { 'use gpu'; if (x) { 'use gpu'; } }`)).toHaveLength(1);
+    expect(scan(`if (x) { function f() { 'use gpu'; } }`)).toHaveLength(1);
+  });
+});
+
 describe('use-gpu-scan: transformed or not', () => {
   const transformed = (source: string) => scan(source).map((d) => d.transformed);
 
