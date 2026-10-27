@@ -3,7 +3,7 @@
 import { Architect, createBuilder, type Builder } from '@angular-devkit/architect';
 import { TestingArchitectHost } from '@angular-devkit/architect/testing';
 import { logging, schema } from '@angular-devkit/core';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BAD_SHADER, createProject, posix, SHADER, tsconfigWith, waitFor, type Project } from '../tools/typegpu-shaders/project';
@@ -597,6 +597,60 @@ describe('what the message says', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('imported in a way that cannot work');
     expect(result.error).not.toContain('the shader build failed');
+  });
+});
+
+describe('a failing shader step is a failed run with a message of its own (L3/E8), not the CLI\'s "An unhandled exception occurred"', () => {
+  it('a shader output location that cannot be written (a file where the folder must be) ends the run with the tool\'s name and the reason, and the official builder never runs', async () => {
+    project.write('shaders-dist', 'not a folder'); // the build cannot create its output here: ENOTDIR/EEXIST on every platform and for every user (chmod would not bind root or Windows)
+    setup('application', '@angular/build:application', 'application');
+    const { result } = await run('build', { tsConfig: 'tsconfig.app.json' });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/^\[typegpu-shaders\] the shader step failed/);
+    expect(result.error).toMatch(/ENOTDIR|EEXIST|not a directory/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a dependency of the tool that is missing (esbuild) says so', async () => {
+    setup('application', '@angular/build:application', 'application');
+    rmSync(project.path('node_modules', 'esbuild')); // the project\'s own copy: the tool needs it to bundle the shader modules
+    const { result } = await run('build', { tsConfig: 'tsconfig.app.json' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('[typegpu-shaders] the shader step failed');
+    expect(result.error).toMatch(/esbuild/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a read-only output folder is named as not writable (skipped where the file system does not enforce it: Windows, root)', async (context) => {
+    setup('application', '@angular/build:application', 'application');
+    mkdirSync(project.path('shaders-dist'));
+    chmodSync(project.path('shaders-dist'), 0o555);
+    try {
+      writeFileSync(project.path('shaders-dist', 'probe'), '');
+      context.skip(); // the write worked: this user or platform ignores the mode
+    } catch {
+      /* enforced */
+    }
+    try {
+      const { result } = await run('build', { tsConfig: 'tsconfig.app.json' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('the shader step failed');
+      expect(result.error).toMatch(/EACCES|EPERM/);
+    } finally {
+      chmodSync(project.path('shaders-dist'), 0o755);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('the failure of the official builder is still passed on as it is (the shader step did not fail)', async () => {
+    stockBehavior = async function* () {
+      throw new Error('esbuild exploded');
+    };
+    setup('application', '@angular/build:application', 'application');
+    const { result, finished } = await run('build', { tsConfig: 'tsconfig.app.json' }).catch((error) => ({ result: { success: false, error: String(error?.message ?? error) }, finished: Promise.resolve() }));
+    await finished;
+    expect(result.success).toBe(false);
+    expect(String(result.error ?? '')).not.toContain('the shader step failed');
   });
 });
 
