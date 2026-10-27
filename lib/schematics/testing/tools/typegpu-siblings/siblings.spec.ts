@@ -1,6 +1,6 @@
 // The sibling generator (tools/typegpu-siblings): one generated file next to each `*.gpu.ts`, current-ness decided by the header of that file.
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -204,6 +204,15 @@ describe('imports in the sources', () => {
   });
 });
 
+it("a tgpu.fn(...) function in a plain module a shader imports is an error too (the transform gives it its metadata), a comment about it is not", async () => {
+  project.write('src/model.ts', `// tgpu.fn([d.f32], d.f32)((x) => x)\nexport const SCALE = 3;\n`);
+  expect((await generate(config())).ok).toBe(true);
+  project.write('src/model.ts', `import tgpu, { d } from 'typegpu';\nexport const SCALE = 3;\nexport const twice = tgpu.fn([d.f32], d.f32)((x) => x * 2);\n`);
+  const result = await generate(config());
+  expect(result.ok).toBe(false);
+  expect(posix(result.diagnostics[0].file)).toBe('src/model.ts');
+});
+
 describe('writing next to the sources is safe', () => {
   const victim = () => join(project.root, 'victim.txt');
   beforeEach(() => writeFileSync(victim(), 'victim'));
@@ -303,6 +312,25 @@ describe('several processes at once', () => {
     expect(exits.map((e) => e.code)).toEqual([0, 0, 0]);
     expect(project.read('src/wave.gpu.generated.js')).toContain('v = 2');
     expect(codes()).toEqual([]);
+  });
+});
+
+describe('a case-only rename of a shader', () => {
+  // only on a case-insensitive file system (macOS, Windows) can `Big.gpu.generated.js` be found under the old name `big.gpu.generated.js`
+  it('rewrites the generated files under the new case, so importers and TypeScript (forceConsistentCasingInFileNames) agree', async () => {
+    writeFileSync(project.path('src/probe-case.txt'), '');
+    const insensitive = existsSync(project.path('src/PROBE-CASE.txt'));
+    if (!insensitive) return; // nothing to test: a case-sensitive file system has two distinct files
+    project.write('src/big.gpu.ts', SHADER);
+    await generate(config());
+    renameSync(project.path('src/big.gpu.ts'), project.path('src/Big.gpu.ts'));
+    const result = await generate(config());
+    expect(result.ok).toBe(true);
+    expect(readdirSync(project.path('src')).filter((n) => /generated/i.test(n) && /big/i.test(n)).sort()).toEqual(['Big.gpu.generated.d.ts', 'Big.gpu.generated.js']);
+    expect(codes()).toEqual([]);
+    renameSync(project.path('src/Big.gpu.ts'), project.path('src/big.gpu.ts')); // and back
+    await generate(config());
+    expect(readdirSync(project.path('src')).filter((n) => /generated/i.test(n) && /big/i.test(n)).sort()).toEqual(['big.gpu.generated.d.ts', 'big.gpu.generated.js']);
   });
 });
 

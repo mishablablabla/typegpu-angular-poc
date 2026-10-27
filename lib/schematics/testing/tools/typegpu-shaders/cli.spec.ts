@@ -184,7 +184,7 @@ describe('the commands the package exposes', () => {
   it('declares typegpu-shaders and typegpu-check-bundle, both with a node shebang', () => {
     const lib = join(__dirname, '..', '..', '..', '..');
     const manifest = JSON.parse(readFileSync(join(lib, 'package.json'), 'utf8')) as { bin: Record<string, string> };
-    expect(Object.keys(manifest.bin).sort()).toEqual(['typegpu-check-bundle', 'typegpu-shaders']);
+    expect(Object.keys(manifest.bin).sort()).toEqual(['typegpu-check-bundle', 'typegpu-shaders', 'typegpu-siblings']);
     for (const file of Object.values(manifest.bin)) expect(readFileSync(join(lib, file), 'utf8').split('\n')[0]).toBe('#!/usr/bin/env node');
   });
 });
