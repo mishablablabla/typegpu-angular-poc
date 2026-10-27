@@ -1,4 +1,4 @@
 export interface NgAddOptions {
   project?: string;
-  shaders?: 'plugin' | 'prebuild';
+  shaders?: 'plugin' | 'prebuild' | 'siblings';
 }

@@ -17,6 +17,7 @@
   "sideEffects": false,
   "bin": {
     "typegpu-shaders": "./tools/typegpu-shaders/cli.mjs",
+    "typegpu-siblings": "./tools/typegpu-siblings/cli.mjs",
     "typegpu-check-bundle": "./tools/check-shader-bundle.mjs"
   },
   "scripts": {

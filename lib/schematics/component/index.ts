@@ -56,7 +56,9 @@ export function component(options: ComponentOptions): Rule {
     // Plugin mode imports the shader module next to the component. Prebuild mode (the project's builders build the shaders first)
     // imports the generated copy through `@shaders/...`: a relative import of a shader module would bundle its untransformed source.
     let shaderImport = `./${dashed}.gpu`;
-    if (prebuild) {
+    const siblings = prebuild && tree.exists(posix.join(project.root, 'typegpu-shaders.config.json')) && /"mode"\s*:\s*"siblings"/.test(tree.readText(posix.join(project.root, 'typegpu-shaders.config.json')));
+    if (siblings) shaderImport = `./${dashed}.gpu.generated`;
+    else if (prebuild) {
       const sourceRoot = posix.normalize((project.sourceRoot ?? posix.join(project.root, 'src')).replace(/^\.?\//, ''));
       const inside = posix.relative(sourceRoot, posix.join(parsed.path.replace(/^\//, ''), dashed, `${dashed}.gpu`));
       if (inside.startsWith('..')) {

@@ -190,7 +190,12 @@ function tsconfigsOf(project: ProjectDefinition): { build?: string; others: { la
   return { build: buildTsConfig, others };
 }
 
+/** What the experimental `siblings` mode (the same wrapper builders, the `typegpu-siblings` generator) writes instead of a tsconfig path. */
+const SIBLINGS_IGNORE = '*.gpu.generated.*';
+const SIBLINGS_CONFIG = 'typegpu-shaders.config.json';
+
 export function ngAddPrebuild(options: NgAddOptions): Rule {
+  const siblings = options.shaders === 'siblings';
   return async (tree) => {
     const workspace = await readWorkspace(tree);
     const command = `ng add ${PACKAGE_NAME} --shaders prebuild`;
@@ -249,7 +254,7 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
         const { build: otherBuild, others: otherOthers } = tsconfigsOf(workspace.projects.get(name)!);
         return [otherBuild, ...otherOthers.map((o) => o.path)].filter((p): p is string => !!p && tree.exists(p)).map((p) => configChain(tree, p));
       });
-    const tsconfigEdits = planTsconfig(tree, projectName, out, buildTsConfig, others, otherApplications);
+    const tsconfigEdits = siblings ? [] : planTsconfig(tree, projectName, out, buildTsConfig, others, otherApplications);
 
     const notes: string[] = [];
     const test = project.targets.get('test');
@@ -292,13 +297,16 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
 
     const files: Rule = (host) => {
       for (const edit of tsconfigEdits) applyTsconfig(host, edit);
+      const configPath = posix.join(project.root, SIBLINGS_CONFIG);
+      if (siblings && !host.exists(configPath)) host.create(configPath, `${JSON.stringify({ mode: 'siblings' }, null, 2)}\n`);
+      const ignored = siblings ? SIBLINGS_IGNORE : `${SHADERS_OUT}/`;
       if (host.exists('.gitignore')) {
         const text = host.readText('.gitignore');
-        if (!text.split(/\r?\n/).some((line) => line.trim().replace(/^\//, '').replace(/\/$/, '') === SHADERS_OUT)) {
-          host.overwrite('.gitignore', `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}\n# TypeGPU shader prebuild output\n${SHADERS_OUT}/\n`);
+        if (!text.split(/\r?\n/).some((line) => line.trim().replace(/^\//, '').replace(/\/$/, '') === ignored.replace(/\/$/, ''))) {
+          host.overwrite('.gitignore', `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}\n# TypeGPU shader ${siblings ? 'siblings' : 'prebuild output'}\n${ignored}\n`);
         }
       } else {
-        notes.push(`There is no .gitignore: add "${SHADERS_OUT}/" to the ignore list of your version control.`);
+        notes.push(`There is no .gitignore: add "${ignored}" to the ignore list of your version control.`);
       }
     };
 
@@ -311,7 +319,9 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
         notes.forEach((line) => ctx.logger.warn(line));
         ctx.logger.info(
           `TypeGPU shader prebuild is set up for "${projectName}": ng build, ng serve and ng test now build the shaders first (builders ${WRAPPERS.build}, ${WRAPPERS.serve}, ${testBuilder ?? 'the test builder was left as it is'}). ` +
-            `Shaders are the "*.gpu.ts" files under the project's source root, imported from application code as "@shaders/<path under the source root>" (not by a relative path: the build refuses those; "typegpu-shaders check --fix-imports" rewrites existing imports). ` +
+            (siblings
+              ? `Shaders are the "*.gpu.ts" files under the project's source root; each gets "<name>.gpu.generated.js" and "<name>.gpu.generated.d.ts" next to it, and application code imports "./<name>.gpu.generated" (not "./<name>.gpu": the build refuses that). `
+              : `Shaders are the "*.gpu.ts" files under the project's source root, imported from application code as "@shaders/<path under the source root>" (not by a relative path: the build refuses those; "typegpu-shaders check --fix-imports" rewrites existing imports). `) +
             `Until the first shader exists the builds run as before.`,
         );
       },

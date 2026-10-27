@@ -48,7 +48,7 @@ const unsupported = (what: string, fix: string) => new SchematicsException(`${wh
  * Idempotent; refuses (modifying no project file) build setups it cannot extend safely.
  */
 export function ngAdd(options: NgAddOptions): Rule {
-  if (options.shaders === 'prebuild') return ngAddPrebuild(options);
+  if (options.shaders === 'prebuild' || options.shaders === 'siblings') return ngAddPrebuild(options);
   return async (tree, context) => {
     const workspace = await readWorkspace(tree);
     const projectName = selectApplication(workspace, options.project, `ng add ${PACKAGE_NAME}`);
