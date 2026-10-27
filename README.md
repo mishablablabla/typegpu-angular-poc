@@ -44,7 +44,7 @@ Node: CI runs Node 24 and 22.22.3; the package declares `engines.node` `^20.19.0
 node scripts/verify-package.mjs lib/typegpu-poc-angular-0.0.1.tgz   # the tarball contains and declares everything it must
 ./scripts/acceptance-clean-consumer.sh      # new Angular app + ng add + ng generate + tests + builds + shader check (needs the network)
                                             #   ANGULAR_CLI=20|21|22, PM=pnpm, TYPEGPU_SPEC=<range>, PKG_TGZ=<tarball> select the scenario
-./scripts/prebuild-e2e.sh <tarball> <workdir> [angular major]       # the prebuild mode with the real Angular CLI (27 checks)
+./scripts/prebuild-e2e.sh <tarball> <workdir> [angular major]       # the prebuild mode with the real Angular CLI (28 checks)
 ./scripts/acceptance-npm-workspaces.sh      # the same in an npm workspace with hoisted dependencies (ANGULAR_CLI=21|22)
 ```
 
@@ -65,7 +65,7 @@ There is no pull request template and no contribution guide yet; changes go thro
 | `pack` (Ubuntu) | the library is packed **once** from the checkout; `scripts/verify-package.mjs` checks the tarball (every file the manifest, `collection.json` and `builders.json` point to exists, no specs or local paths, bin files executable with LF, manifest fields); the tarball is uploaded as an artifact |
 | `app` (Ubuntu Node 24 and 22.22.3, Windows Node 24) | downloads that exact tarball, `npm ci` in `app/` from its lockfile, `npm install --no-save` of the tarball, checks the installed copy is byte-identical to the tarball, then `ng test`, `ng build` and the shader bundle check; fails if a tracked package file changed |
 | `acceptance` (Angular 20, 21, 22; Ubuntu Node 24) | `ng new`, `ng add`, `ng generate`, builds, `ng test`, shader bundle check from the same tarball in plugin mode (`scripts/acceptance-clean-consumer.sh`) |
-| `prebuild-e2e` (Angular 22; Ubuntu Node 24) | the prebuild mode with the real CLI from the same tarball: `scripts/prebuild-e2e.sh` (27 checks) |
+| `prebuild-e2e` (Angular 22; Ubuntu Node 24) | the prebuild mode with the real CLI from the same tarball: `scripts/prebuild-e2e.sh` (28 checks) |
 
 **Why `app/` does not pin the tarball.** The hash of a tarball changes with any change of any shipped file, so a committed hash is stale after the next library change (the one that was committed here never matched, not even on the author's machine), and `npm ci` then fails with `EINTEGRITY` for everybody. Deleting that hash in CI would hide exactly the kind of inconsistency the check exists for, and packing on another operating system can change file modes (Windows has no executable bit), so a hash cannot be shared across operating systems either. The lockfile therefore pins every third-party package and says nothing about the library under test; the library is packed once on Linux, verified, and added from that exact tarball.
 

@@ -26,7 +26,7 @@ Before adopting it, read "Shader authoring" (limits): the default mode needs a *
 **Run by GitHub Actions on every push and pull request** (`.github/workflows/ci.yml`; the jobs and what they prove are listed in the repository README):
 - the unit and integration specs of the schematics, the wrapper builders and the `typegpu-shaders` tool (`lib/`) and both typechecks: Ubuntu with Node 24 and Node 22.22.3, Windows with Node 24;
 - the package is packed once on Linux, its contents are verified (`scripts/verify-package.mjs`: every file the manifest, `collection.json` and `builders.json` point to, no specs or fixtures, no local paths) and that exact tarball is installed into `app/`, whose library specs and production build run on Ubuntu (Node 24 and 22.22.3) and Windows (Node 24);
-- real Angular CLI runs on Ubuntu (Node 24) from the same tarball: `ng new`, `ng add`, `ng generate`, builds, `ng test` and the shader bundle check for Angular 20, 21 and 22 in plugin mode (`scripts/acceptance-clean-consumer.sh`), and the prebuild mode on Angular 22 (`scripts/prebuild-e2e.sh`, 27 checks: `ng add` and its rerun, a bare `ng build` on a clean checkout, `ng extract-i18n`, `ng test`, an edited shader, and the failure cases).
+- real Angular CLI runs on Ubuntu (Node 24) from the same tarball: `ng new`, `ng add`, `ng generate`, builds, `ng test` and the shader bundle check for Angular 20, 21 and 22 in plugin mode (`scripts/acceptance-clean-consumer.sh`), and the prebuild mode on Angular 22 (`scripts/prebuild-e2e.sh`, 28 checks: `ng add` and its rerun, a bare `ng build` on a clean checkout, `ng extract-i18n`, `ng test`, an edited shader, and the failure cases).
 
 **Verified by hand** (macOS arm64, Node 24.21.0 unless noted; the QA runs of 2026-10-26 and 27 with the packed package; commands and results in `QA_EXECUTION_LOG.md`, every finding in `QA_FINDINGS.md`). This is what CI does **not** run:
 
@@ -295,7 +295,7 @@ An alternative to the esbuild plugin above. The `'use gpu'` modules are transfor
 - The freshness key covers the sources of the closure, the tsconfig (and the files it extends by a relative path), the versions of `typegpu`, `unplugin-typegpu`, esbuild, TypeScript and Babel, and the tool's own code. Sources are read once per build and everything is built from those bytes, so a file edited (and edited back) during a build cannot make the manifest describe other bytes than it holds.
 - The generated modules exist only after the first build: an editor shows `@shaders/...` as unresolved until then (run any `ng` build, or `typegpu-shaders build`).
 - The wrappers rely on `@angular/build` exports that Angular marks experimental; the fallback and the drift warning limit, but do not remove, the exposure to an Angular release that changes them.
-- Real-`ng` flows (serve, kill, concurrency) were only run on macOS; CI runs the unit and integration specs on Linux and Windows and the prebuild flow script (27 checks) on Linux; see "Compatibility". The prebuild is **experimental**: it keeps its own state on disk and depends on experimental `@angular/build` exports; it is not offered as production-ready.
+- Real-`ng` flows (serve, kill, concurrency) were only run on macOS; CI runs the unit and integration specs on Linux and Windows and the prebuild flow script (28 checks) on Linux; see "Compatibility". The prebuild is **experimental**: it keeps its own state on disk and depends on experimental `@angular/build` exports; it is not offered as production-ready.
 
 ## Failure behavior
 

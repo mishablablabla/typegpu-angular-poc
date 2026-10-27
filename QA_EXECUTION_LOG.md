@@ -126,7 +126,7 @@ Environment: macOS arm64 (Darwin 25.3), Node 24.21.0, npm 11.19.0, pnpm 12.10.x,
 | `pack` + `scripts/verify-package.mjs` | Ubuntu | passed; tarball uploaded and reused by the other jobs |
 | `app`: `npm ci`, `npm install --no-save <tarball>`, installed copy equals the tarball, `ng test`, `ng build`, bundle check | Ubuntu Node 24 and 22.22.3, Windows Node 24 | 13 files, 166 passed each; build and check passed |
 | acceptance (`ng new`, `ng add`, `ng generate`, builds, `ng test`, bundle check, plugin mode) | Ubuntu Node 24, Angular 20, 21, 22 | passed |
-| `prebuild-e2e` (27 checks, real CLI, prebuild mode) | Ubuntu Node 24, Angular 22 | all 27 passed |
+| `prebuild-e2e` (28 checks, real CLI, prebuild mode) | Ubuntu Node 24, Angular 22 | all 28 passed |
 | `lib` suite, flake loops, leak guard | macOS (6 of 6 full runs, two concurrent suites for 3 rounds; five specs 15 of 15) and a Linux container (487 passed, 10 skipped as root) | passed; the run fails if a spec leaves a temporary folder |
 | Real-`ng` scenarios (serve, kill -9, concurrency, SSR, browser rendering) | macOS only, by hand/harness | see the lane tables above; state machine 48 of 48 on Angular 22.2.4 |
 

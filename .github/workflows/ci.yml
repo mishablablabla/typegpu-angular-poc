@@ -179,7 +179,7 @@ jobs:
           PKG_TGZ="$(ls "$PWD"/lib/typegpu-poc-angular-*.tgz)" ./scripts/acceptance-clean-consumer.sh
 
   # `ng add --shaders prebuild` with the real Angular CLI 22, from the same tarball: the stock `ng build`, `ng test` and `ng extract-i18n` build the
-  # shaders themselves, and every way it can go wrong fails with a message that says why (27 checks, about 1 to 2 minutes). Linux only: the script is
+  # shaders themselves, and every way it can go wrong fails with a message that says why (28 checks, about 1 to 2 minutes). Linux only: the script is
   # plain bash and was run on macOS, but not on Git Bash for Windows, and one check (a read-only folder) needs a user that is not root.
   prebuild-e2e:
     name: prebuild-e2e (Angular 22)
