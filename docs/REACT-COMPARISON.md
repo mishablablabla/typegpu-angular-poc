@@ -27,7 +27,7 @@ Source read: `packages/typegpu-react/src/**` at 0.12.2 in the TypeGPU monorepo (
 
 | Topic | React package | This PoC | Evidence |
 |---|---|---|---|
-| Animation loops for N consumers | N | 1 | `frame.spec.ts` ("shares one loop"), mutation-checked |
+| Animation loops for N consumers | N | 1 | independent experiment (rAF registrations constant for 1, 5 and 20 consumers); `frame.spec.ts` ("shares one loop") cannot detect N loops |
 | Signal/prop -> uniform timing | write on render (before the frame that follows) | value visible to the same frame's callbacks | `resources.spec.ts`; React behaviour not re-measured here |
 | Missing WebGPU | error thrown to a boundary | `unsupported` state, no error | `type-gpu.spec.ts`, real-browser run (`nogpu.html`) |
 | Device loss | not handled | `lost` state, content torn down, manual `retry()` | `ready.spec.ts` (fake), real device `destroy()` in browser |

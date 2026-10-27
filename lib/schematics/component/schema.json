@@ -7,7 +7,7 @@
   "properties": {
     "name": {
       "type": "string",
-      "description": "The name of the component, e.g. `my-canvas`. It becomes the class, the selector and the file names.",
+      "description": "The name of the component, e.g. `my-canvas`. It becomes the class, the selector and the file names, so it may only contain letters, digits and dashes (camelCase and PascalCase are converted), starting with a letter.",
       "$default": { "$source": "argv", "index": 0 },
       "x-prompt": "What name would you like to use for the component?"
     },

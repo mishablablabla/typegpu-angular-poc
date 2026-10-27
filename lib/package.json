@@ -5,13 +5,23 @@
   "license": "MIT",
   "private": true,
   "peerDependencies": {
+    "@angular-devkit/architect": ">=0.2000.0 <0.2300.0",
     "@angular/common": "^20.0.0 || ^21.0.0 || ^22.0.0",
     "@angular/core": "^20.0.0 || ^21.0.0 || ^22.0.0",
     "@babel/core": "^7.28.0",
+    "esbuild": ">=0.24.0",
     "typegpu": "^0.12.8",
+    "typescript": ">=5.5.0",
     "unplugin-typegpu": "^0.12.6"
   },
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
   "sideEffects": false,
+  "bin": {
+    "typegpu-shaders": "./tools/typegpu-shaders/cli.mjs",
+    "typegpu-check-bundle": "./tools/check-shader-bundle.mjs"
+  },
   "scripts": {
     "build": "ng-packagr -p ng-package.json -c tsconfig.lib.prod.json && npm run build:schematics",
     "build:schematics": "tsc -p schematics/tsconfig.json && node scripts/copy-schematic-assets.mjs",
@@ -19,21 +29,26 @@
     "pack": "npm run build && cd dist && npm pack --pack-destination .."
   },
   "dependencies": {
+    "jsonc-parser": "^3.3.1",
     "tslib": "^2.8.1"
   },
   "devDependencies": {
+    "@angular-devkit/architect": "^0.2202.4",
     "@angular-devkit/core": "~22.2.4",
     "@angular-devkit/schematics": "~22.2.4",
     "@angular/common": "~22.2.0",
     "@angular/compiler": "~22.2.0",
     "@angular/compiler-cli": "~22.2.0",
     "@angular/core": "~22.2.0",
+    "@babel/core": "^7.29.7",
     "@schematics/angular": "~22.2.4",
     "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
     "ng-packagr": "^22.2.5",
     "rxjs": "~7.8.0",
     "typegpu": "0.12.8",
     "typescript": "~6.0.3",
+    "unplugin-typegpu": "0.12.6",
     "vitest": "^5.0.5"
   },
   "peerDependenciesMeta": {
@@ -42,9 +57,19 @@
     },
     "unplugin-typegpu": {
       "optional": true
+    },
+    "esbuild": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    },
+    "@angular-devkit/architect": {
+      "optional": true
     }
   },
   "schematics": "./schematics/collection.json",
+  "builders": "./builders.json",
   "ng-add": {
     "save": "dependencies"
   }

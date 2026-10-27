@@ -1,17 +1,6 @@
 // Lifecycle regression tests: server behaviour, first render, device loss, failing callbacks, destroyed owners.
 // Each test name states the behaviour it protects.
-import {
-  Component,
-  EnvironmentInjector,
-  ErrorHandler,
-  PLATFORM_ID,
-  createEnvironmentInjector,
-  input,
-  runInInjectionContext,
-  signal,
-  viewChild,
-  ElementRef,
-} from '@angular/core';
+import { Component, ErrorHandler, PLATFORM_ID, input, signal, viewChild, ElementRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { d } from 'typegpu';
@@ -175,26 +164,35 @@ describe('device loss', () => {
     expect(second.liveResources()).toBe(1);
   });
 
-  it('an old root that is lost after a retry does not affect the new root', async () => {
+  it('a device-loss notification of an OLD root that arrives after retry() never touches the new root (guard against a repeated callback)', async () => {
+    // A real `device.lost` promise settles once, so this cannot happen with a real device. The service still
+    // does not trust it: the handler of an old root must be inert once the service has moved on. A thenable that can
+    // call its listener again stands in for "a runtime that notifies twice".
     const first = createFakeTypeGpu();
     const second = createFakeTypeGpu();
+    const listeners: ((info: GPUDeviceLostInfo) => void)[] = [];
+    Object.assign(first.root.device, { lost: { then: (listener: (info: GPUDeviceLostInfo) => void) => void listeners.push(listener) } });
     const createRoot = vi.fn<() => Promise<TgpuRoot>>().mockResolvedValueOnce(first.root).mockResolvedValueOnce(second.root);
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ providers: [provideTypeGpu({ createRoot })] });
     const gpu = TestBed.inject(TypeGpu);
     TestBed.tick();
     await gpu.whenReady();
-    first.loseDevice();
-    await settle();
+    expect(listeners.length).toBe(1);
+
+    listeners[0]!({ reason: 'unknown', message: 'first notification' } as GPUDeviceLostInfo);
+    expect(gpu.state().status).toBe('lost');
     gpu.retry();
     await gpu.whenReady();
     expect(gpu.root()).toBe(second.root);
 
-    first.loseDevice({ message: 'second notification' }); // already resolved: no effect, but must not throw
+    listeners[0]!({ reason: 'unknown', message: 'late repeat for the old root' } as GPUDeviceLostInfo);
+    expect(gpu.state().status).toBe('ready'); // the new root is untouched
+    expect(gpu.root()).toBe(second.root);
+
     second.loseDevice();
     await settle();
-    expect(gpu.state().status).toBe('lost');
-    expect(gpu.state().status === 'lost' && gpu.state()).toMatchObject({ info: { message: 'fake device lost' } });
+    expect(gpu.state()).toMatchObject({ status: 'lost', info: { message: 'fake device lost' } }); // only the CURRENT root's loss counts
   });
 });
 
@@ -222,11 +220,5 @@ describe('callbacks that fail', () => {
   });
 });
 
-describe('owners that are already destroyed', () => {
-  it('creating a resource in a destroyed injector fails loudly instead of leaking a buffer', () => {
-    const injector = createEnvironmentInjector([], TestBed.inject(EnvironmentInjector));
-    injector.destroy();
-    expect(() => runInInjectionContext(injector, () => injectUniform(d.f32))).toThrow();
-    expect(fake.liveResources()).toBe(0);
-  });
-});
+// "Creating a resource in a destroyed owner" lives in resources.spec.ts: it needs a destroyed component injector
+// (the case where a buffer would leak), not a destroyed environment injector, where Angular itself throws first.

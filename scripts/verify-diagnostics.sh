@@ -7,8 +7,9 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 app="$(cd "${1:?usage: verify-diagnostics.sh <configured app dir>}" && pwd)"
 cd "$app"
-cp src/main.ts /tmp/diag-main.bak
-cleanup() { cp /tmp/diag-main.bak src/main.ts; rm -f src/wrong-usage.spec.ts src/probe-ng8116.ts /tmp/diag-main.bak; for m in unplugin-typegpu @babel/core; do [ -d "node_modules/$m.off" ] && mv "node_modules/$m.off" "node_modules/$m"; done; }
+bak="$(mktemp)"
+cp src/main.ts "$bak"
+cleanup() { cp "$bak" src/main.ts; rm -f src/wrong-usage.spec.ts src/probe-ng8116.ts "$bak"; for m in unplugin-typegpu @babel/core; do [ -d "node_modules/$m.off" ] && mv "node_modules/$m.off" "node_modules/$m"; done; }
 trap cleanup EXIT
 fail=0
 check() { if [ "$2" = ok ]; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
@@ -35,7 +36,7 @@ build="$(npx ng build -c development 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
 echo "$build" | grep -E "NG8116|Application bundle" | cut -c1-200
 echo "$build" | grep -q "WARNING.*NG8116" && check "NG8116 is a warning and the build still completes" ok || check "NG8116 warning" bad
 echo "$build" | grep -q "Application bundle generation complete" || check "build completes" bad
-cp /tmp/diag-main.bak src/main.ts; rm -f src/probe-ng8116.ts
+cp "$bak" src/main.ts; rm -f src/probe-ng8116.ts
 
 echo "--- 3) a missing peer stops the build at start with an install hint"
 for pkg in unplugin-typegpu @babel/core; do

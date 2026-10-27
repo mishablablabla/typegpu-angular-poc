@@ -1,7 +1,7 @@
 import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
 import { common, d } from 'typegpu';
 import { TgpuCanvas, TgpuReady, TypeGpu, injectFrame, injectRoot, injectUniform } from '<%= packageName %>';
-import { sceneFragment } from './<%= dasherize(name) %>.gpu';
+import { sceneFragment } from '<%= shaderImport %>';
 
 /** Hue in degrees to an RGB tint for the shader. */
 const tintOf = (hue: number) => d.vec3f(hue / 360, 1 - hue / 360, 0.6);

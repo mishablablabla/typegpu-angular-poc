@@ -1,0 +1,139 @@
+# QA_EXECUTION_LOG.md
+
+Environment for all entries unless noted: macOS arm64 (Darwin 25.3), Node 24.21.0, npm 11.19.0, pnpm 12.10.1, Angular CLI 22.2.4 (`@angular/build` 22.2.4), package = packed tarball sha256 `d8d71d75…571a` built from the current worktree. Phase: **BASELINE** (no code modified yet in this QA run). Sandbox: `<scratch>/qa/lead/` (`base-plugin`, `base-prebuild`). Shared machine: up to 6 other lanes were running concurrently.
+
+## Baseline — plugin mode (documented quick path), project `base-plugin`
+| # | Command | Exit | Result | Evidence |
+|---|---|---|---|---|
+| 0 | `npx @angular/cli@22.2.4 new base-plugin --skip-git --style=css --ssr=false --routing=false --defaults` | 0 | PASS | CLI 22.2.4, npm install ok |
+| 1-2 | `ng add <tgz> --skip-confirmation` | 0 | PASS | UPDATE angular.json, package.json; warns "unmet peer dependencies" (documented) |
+| 3 | diff of changed files | — | PASS | angular.json: 3 builders → custom-esbuild, `plugins` entry, test options; package.json: deps `typegpu 0.12.8`, `@angular-builders/custom-esbuild ^22`, `@babel/core ^7.28`, `unplugin-typegpu 0.12.6`, `@typegpu-poc/angular file:../../pack/…tgz`, script `check:shaders`; tsconfigs and .gitignore unchanged |
+| 3b | `ng generate @typegpu-poc/angular:component my-canvas` (+ wire into app) | 0 | PASS | CREATE .gpu.ts, .spec.ts, .ts |
+| 4 | `ng serve --port 4501` | — | PASS | "Application bundle generation complete [1.9 s]"; HTTP 200 |
+| 5-7 | load page in embedded Chromium (WebGPU on) | — | PASS | canvas 2016x480, gradient drawn, no console errors, no banner; served bundle has `__TYPEGPU_META__` ×1 |
+| 8 | edit shader constant while serving | — | PASS | rebuild 0.26 s, "Page reload sent", new value in served bundle |
+| 9 | `ng build --configuration development`; `ng build` (prod) | 0 / 0 | PASS | `check-shader-bundle`: "1 'use gpu' directive(s) … all transformed" (exit 0 both); value present in prod bundle; `npm run check:shaders` exit 0 |
+| 10a | `ng test --watch=false` | 0 | PASS | 2 files, 4 tests passed |
+| 10b | `NG_FORCE_TTY=true ng test` (watch), edit spec, shader, SIGINT to own process group | — | PASS (nuance) | first run 4 passed; "Changes detected. Rebuilding… complete"; a comment-only spec edit did not rerun tests (bundle identical: vitest semantics, not a defect); process group gone after SIGINT. Harness note: forced TTY triggers Angular's analytics prompt in a fresh project → use `NG_CLI_ANALYTICS=false` |
+| 11 | broken shader (`try/catch` in `'use gpu'`): `ng build`, `npm run check:shaders`, `ng test --watch=false` | 1 / 1 / 1 | PASS | message `src/app/my-canvas/my-canvas.gpu.ts: Unsupported JS functionality: TryStatement [plugin typegpu-shaders]` (file, no line); dist not produced |
+| 12 | second `ng add` | 0 | PASS | angular.json, package.json, package-lock.json, tsconfigs, .gitignore byte-identical |
+| 13 | no dependence on unpublished workspace files | — | PASS (note) | node_modules package is a real copy (not symlink); no config/lock refers to the repo; the only external reference is the documented relative `file:` path to the tarball |
+
+## Baseline — prebuild mode, project `base-prebuild`
+| # | Command | Exit | Result | Evidence |
+|---|---|---|---|---|
+| 1-2 | `ng add <tgz> --shaders prebuild --skip-confirmation` | 0 | PASS | UPDATE angular.json, package.json, tsconfig.json, .gitignore |
+| 3 | diff | — | PASS | builders → `@typegpu-poc/angular:application|dev-server|unit-test`; deps typegpu, @babel/core, esbuild, unplugin-typegpu; `tsconfig.json` `paths` `@shaders/*` → `./shaders-dist/*`; `.gitignore` `shaders-dist/` |
+| 3b | generate component (+ wire) | 0 | PASS | component imports `@shaders/app/my-canvas/my-canvas.gpu` |
+| 4 | `ng serve --port 4502` | — | PASS | "[typegpu-shaders] 1 modules (1146 ms)", build complete 2.5 s, HTTP 200 |
+| 5-7 | embedded Chromium | — | PASS | canvas drawn, no console errors, no banner |
+| 8 | edit shader while serving | — | PASS | 0.08 s rebuild, reload sent; new value in `shaders-dist` and served bundle; META in `shaders-dist/*.js` |
+| 9 | `ng build -c development`, `ng build` | 0 / 0 | PASS | bundle check all transformed; value in prod bundle |
+| 10a | `ng test --watch=false` | 0 | PASS | 4 passed |
+| 10b | `NG_FORCE_TTY=true ng test` watch: real spec edit | — | PASS | 2nd run "3 passed" (vitest reruns the changed file); shader edit rebuilt shaders (264 ms); SIGINT: group gone |
+| 11 | broken shader: `ng build`; `ng test --watch=false`; `CI=true ng test` (no flag, no TTY) | 1 / 1 / 1 | PASS | `[typegpu-shaders] src/app/my-canvas/my-canvas.gpu.ts - error: Unsupported JS functionality: TryStatement`; no dist |
+| 11b | edit shader with nothing running, bare `ng build` | 0 | PASS | new value in bundle, old value 0 files |
+| 12 | second `ng add --shaders prebuild` | 0 | PASS | all 7 files byte-identical |
+| 13 | workspace references | — | PASS | none |
+
+## Existing suites (baseline)
+| Command | Exit | Result |
+|---|---|---|
+| `cd lib && npm run test:schematics` | 0 | 13 files, **262 tests passed** (41 s, under load from other lanes) |
+
+## Post-baseline entries
+(appended below as the run proceeds)
+
+## Lead lane: failure recovery / state machine (real `ng` processes, packed package in `<scratch>/qa/lead/sm`, prebuild mode) — BASELINE package d8d71d75
+Harness `sm.mjs` (scenarios s2s3 s4 s5 s5b s7 s8 s9 s10 s11 s12 s13 s14 s15). Values are made collision-proof (6-digit marker).
+| Scenario | Result | Evidence |
+|---|---|---|
+| S1 valid build | PASS | exit 0, value in bundle |
+| S2 invalid shader | PASS | exit 1, no dist, manifest `error`, previous good JS of the failed module removed, `typegpu-shaders check` exit 1 |
+| S3 source restored | PASS | next build exit 0 with the new value; output digest equal to the earlier good build |
+| S4/S5 SIGINT at 50/150/300/600/900/1300 ms | PASS ×6 | process ends by SIGINT; no partial dist; the next build correct and `check` ok |
+| S5b kill -9 between "new JS visible" and manifest write, then source reverted | PASS 10/10 landed in the window | `check` exit 1 each time (digest mismatch), next build correct (old fresh-but-wrong hole closed) |
+| S5 kill -9 at 12 time offsets | PASS | 0 wrong |
+| S7 two cold builds at once ×4 | PASS | both exit 0, both bundles right, check ok |
+| S7 serve + 11 concurrent `ng build`s during ~140 shader edits | PASS (no failed build; final served value = last edit) | note: my per-build value regex did not match, so "bundle matches a written value" for the intermediate builds is not evidenced |
+| S8 kill -9 of `ng serve` with a stub; then plain builds | PASS ×3 | plain build fails while broken (stub not bundled), ok after fix, `.tmp` empty |
+| S9 deleted/renamed/hand-edited output, deleted/corrupt manifest | PASS ×6 | rebuilt each time, hand-edit detected |
+| S10 15 rounds of 2-5 rapid edits (0-160 ms apart) while serving | PASS | served and disk end on the last source every round |
+| S11 custom/absolute `--output-path`; untransformed shader via tsconfig alias | PASS ×4 | alias case: build FAILS "1 of 2 'use gpu' directive(s) were not transformed" |
+| S12 empty `shaders-dist`; junk module without manifest | PASS ×2 | rebuilt, junk not bundled |
+| S13 removed module (≥2 shaders) | PASS ×3 | output pruned, dangling import fails |
+| S14 `ng build` from a subfolder; rename of a shader while serving | PASS ×2 | transient "Cannot find module" between the two edits, then healthy |
+| S14 delete the only shader while serving | **FAIL** → L1 | output not pruned |
+| S15 last shader deleted but still imported, plain build | **FAIL** → L1 | exit 0, stale shader bundled |
+| decoy: foreign files in the output folder | **FAIL** → L2 | both user files deleted by one build |
+| read-only output folder | exit 127 → L3 (P4) | generic "unhandled exception … EACCES" |
+
+## Incident (QA process), 21:22 local
+A regression test I wrote for L2 built with `out: '.'` in a temp project whose `node_modules` symlinks to the repository's `lib/node_modules`; before the fix the tool emptied that directory. Restored with `cd lib && npm ci` (228 packages, `esbuild` 0.28.2 and `vitest` 5.0.5 load); the lockfile and package.json were not changed by it. The test now only resolves configuration. Lane D was told to discard runs from that window.
+
+## Post-fix unit evidence (worktree, before re-packing)
+| Command | Exit | Result |
+|---|---|---|
+| `npx vitest run schematics/testing/builders/delegate.spec.ts schematics/testing/tools/typegpu-shaders/ownership.spec.ts` | 0 | 53 passed |
+| `npx vitest run schematics/testing/tools schematics/testing/builders` | 0 | all passed (see final run) |
+| mutants on the new code (4): no cleanup in ensure / in build; walk-and-delete prune; no `out` validation | — | 4/4 killed by `ownership.spec.ts` |
+
+## Post-fix real-CLI verification (package pack3 sha256 `46d2c0c0…07a0`, built from the worktree after the lane B/C fixes) — Lead, `sm.mjs`
+| Scenarios | Result | Notes |
+|---|---|---|
+| s2s3 s4 s5b s7 s8 s9 s10 s11 s12 s13 s14 s15 | 40/41 PASS | the one FAIL (`S8 .tmp leftovers`: 1 file) was the harness counting the new `.tmp/sessions` registry record of a SIGKILLed dev server; harness adjusted (`sessions` ignored), rerun below passes |
+| s16 two dev servers; first SIGINT with a stub, fix, last SIGINT | 6/6 PASS | stub stays while a session lives, removed by the last |
+| s8 (rerun) | 4/4 PASS | `.tmp` 0 files besides `sessions` |
+| S15 (last shader deleted, still imported) | PASS | build exit 1, no stale module (was FAIL on d8d71d75) |
+| S14 delete of the only shader while serving | PASS | output pruned (was FAIL) |
+| B1 independent check (plugin mode `base-plugin`, fixture package) | CONFIRMED DEFECT | default `ng build`: `COND_default`; with `--conditions module --conditions production`: `COND_prod` |
+
+## Post-fix unit evidence
+| Command | Exit | Result |
+|---|---|---|
+| `cd lib && npm run test:schematics` (after C3/C4/C5/C6/C7/C10/C13 fixes) | 0 | **14 files, 281 tests passed** (was 13 files / 262 at baseline) |
+| `npx tsc -p schematics/tsconfig.json --noEmit`; `npx tsc -p tsconfig.lib.json --noEmit` | 0 / 0 | clean |
+| mutants of the new code (L1/L2: 4; C3/C5/C6: 4; C7 1; C10/C13/C4: 3) | — | 12/12 killed |
+
+## Existing suite: `app/` (library runtime specs through Angular's `ng test`)
+| Command | Exit | Result |
+|---|---|---|
+| `cd app && NG_CLI_ANALYTICS=false npx ng test --watch=false` | 0 | 13 files, **166 tests passed** (baseline-style record, worktree before final changes; app/ uses its own installed copy of the library, not the new tarball) |
+
+---
+
+# Round 2 — production-readiness run (2026-10-27)
+
+Environment: macOS arm64 (Darwin 25.3), Node 24.21.0, npm 11.19.0, pnpm 12.10.x, headless Chrome 156 with WebGPU on Metal; Linux through Docker (`node:24`, `node:22`, as a non-root and as root user); Windows and Linux/macOS CI on GitHub Actions. Method: independent read-only audit lanes in scratch clones of the committed state, every proposed fix re-implemented and re-verified by the lead in the repository, regression tests mutation-checked, then CI.
+
+## Lanes and what each established (commands and outcomes are in the lane's own sandbox; this is the ledger of results)
+| Lane | Scope | Result |
+|---|---|---|
+| CI reproducibility | pack reproducibility, tarball/lockfile designs, workflow audit | `npm pack` is byte-identical across directories, rebuilds, macOS, Linux arm64/x64 and Node 22/24 (same sha512); the committed lockfile hash never matched even on the author's machine; the "delete the hash in CI" workaround left stale metadata (bins not linked); 5 designs tried (directory symlink: 139 of 166 specs fail; install-links; workspaces; committed hash; no dependency in the lockfile + `--no-save`): the last chosen (D11); action SHAs verified through the GitHub API |
+| Windows CLI | spawning, quoting, shims, signals, env, paths | `command.mjs` designed and fuzzed against cross-spawn (400k random arguments) and a cmd.exe model; POSIX behaviour verified on a real pty; the two skipped tests identified exactly (see `QA_FINDINGS.md`, "Skipped tests"); every Windows branch is unit-tested through a `platform` parameter and 7 tests run against real `cmd.exe` in CI |
+| Findings | every row of `QA_FINDINGS.md` against the code | 60+ rows re-judged with a revert-check or a real-CLI run; stale or wrong documentation statements listed and corrected (see the docs); B1/B2/F-L5/L3/C9/B3/B5/B8/F-L7/E2/E5 found fixable and fixed |
+| Tests | skips, flakes, isolation, mutation | about 100 mutants (6 real survivors, covered or killed by new tests), 5 sequential + concurrent + shuffled + loaded full runs, leak found (`hash.spec`), a latent overwrite of a real `@angular/build` through a link in the fake-build helper, an order-dependent app tripwire test: all fixed |
+| e22 / e2021 | real `ng` workflows on Angular 22.2.4 / 21.2.28 / 20.3.41, both modes | tables of ~25 scenarios each (build, test, serve + edit/break/recover, SSR, hydration, workers, extract-i18n, idempotency, refusals, concurrency, kill, pnpm); WebGPU rendering verified in headless Chrome on Metal for Angular 22 (production, `ng serve`, SSR server); defects found: SSR dev server bricked by the throwing stub (X1), `extract-i18n` (F-L5), alias detection (B2), Angular 20 SSR `security` (F-L2), papercuts |
+| Security | destructive operations, injection, supply chain | S1-S6 (see findings), proofs by crafted inputs; npm audit: 0 production vulnerabilities in `lib/` and the apps, 2 dev-server advisories in the Vite nested in `@angular/build` 22.2.x (dev only; wait for an Angular release) |
+| Implementation lanes | stub, i18n, alias, addux, winhard, port, port2 | each in its own clone, regression tests, mutation checks, real-CLI verification; merged by cherry-pick, conflicts resolved by the lead |
+| Independent final review | the whole round 2 diff by a reviewer with no briefing; 56 mutants; ran the suite 5x incl. concurrent and shuffled; 22 documentation claims checked | no high-severity defect; 4 real tool bugs (R1-R4), a guard bypass in a script (R5), weak tests and an untyped spec tree (R6-R8), documentation drift: all fixed with regression tests (mutation-checked) except R9/R10, accepted and listed in `QA_FINDINGS.md` |
+| Hybrid experiment | sibling generation prototype | measured and compared (`docs/SHADER-BUILD-ALTERNATIVES.md`, Round 2); not adopted; prototype on `experiment/siblings-prototype` |
+
+## Verification at the final commit
+| What | Where | Result |
+|---|---|---|
+| `lib`: `npm ci`, both typechecks, `npm run test:schematics` | GitHub Actions: Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24 (run 40439829661 at `edf7d09`, after the independent review's fixes) | 22 files: Ubuntu 619 passed + 8 skipped (627), Windows 620 passed + 9 skipped (629) |
+| `pack` + `scripts/verify-package.mjs` | Ubuntu | passed; tarball uploaded and reused by the other jobs |
+| `app`: `npm ci`, `npm install --no-save <tarball>`, installed copy equals the tarball, `ng test`, `ng build`, bundle check | Ubuntu Node 24 and 22.22.3, Windows Node 24 | 13 files, 166 passed each; build and check passed |
+| acceptance (`ng new`, `ng add`, `ng generate`, builds, `ng test`, bundle check, plugin mode) | Ubuntu Node 24, Angular 20, 21, 22 | passed |
+| `prebuild-e2e` (28 checks, real CLI, prebuild mode) | Ubuntu Node 24, Angular 22 | all 28 passed |
+| `lib` suite, flake loops, leak guard | macOS (6 of 6 full runs, two concurrent suites for 3 rounds; five specs 15 of 15) and a Linux container (487 passed, 10 skipped as root) | passed; the run fails if a spec leaves a temporary folder |
+| Real-`ng` scenarios (serve, kill -9, concurrency, SSR, browser rendering) | macOS only, by hand/harness | see the lane tables above; state machine 48 of 48 on Angular 22.2.4 |
+
+CI defects found by the first runs of the new jobs and fixed: `tar | grep -q` under `pipefail` (SIGPIPE) in the acceptance script; npm 10's arborist crash in `ng new` for Angular 21 on Node 22 (acceptance moved to Node 24); on Windows: `URL.pathname` paths, the `Path`/`PATH` key, CRLF fixtures and CRLF output of an LF file, NTFS file ids not fitting a double, folder removal blocked by a just-killed process, a recursive-watcher event without a file name (W12).
+
+## Incidents (disclosed)
+- Round 1: a regression test of the lead emptied `lib/node_modules` once (restored with `npm ci`, lockfile unchanged) and wrote one probe file through a link (removed). Both tests were rewritten.
+- Round 2: five subagents were started with the harness's worktree isolation, which created their worktrees in the **TypeGPU monorepo** (the session's primary repository) instead of this one. Two reported the wrong repository at once; the other three were stopped by the lead within minutes, before they changed anything. Afterwards, read-only checks of the monorepo showed: no worktrees (`.git/worktrees` absent), no extra branches, an empty reflog since 2026-10-23, HEAD `bec5d554`, status the pre-existing `?? docs/` only. An empty, git-ignored `.claude/worktrees` directory remains there (it may pre-date the session). All later lanes used their own clones under the session's scratch directory.
+- A subagent ran one `pkill -f "node -e for"` to remove its own CPU burners (broader than allowed; no other process is known to have been affected) and several lanes left orphaned test processes, which were left alone, not killed by the lead.
+- The system temp folder still holds the old `typegpu-shaders-*` directories of aborted round 1 runs; they were not swept.
