@@ -89,6 +89,16 @@ describe('the file watcher fails', () => {
     expect(() => made[0]!.emit('error', errorOf('EPERM'))).not.toThrow();
   });
 
+  it('an event without a file name (the platform says that something changed, not what) is looked into, not ignored', async () => {
+    const { made, results } = start();
+    await watcher!.ready;
+    const before = results.length;
+    project.write('src/model.ts', 'export const state = { count: 0 };\nexport const SCALE = 11;\n');
+    made[0]!.listener('change', null as unknown as string); // Windows reported the edit of a file next to the output folder like this
+    await waitFor(() => results.length > before, 'a build after an event with a null file name');
+    expect(project.read('shaders-dist/model.js')).toContain('SCALE = 11');
+  });
+
   it('reports once, closes the broken watcher, and arms a new one that rebuilds on a change', async () => {
     const { made, reports, results } = start();
     await watcher!.ready;
