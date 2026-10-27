@@ -99,6 +99,34 @@ describe('the sources change, and change back, while a build runs (A, then B, th
   });
 });
 
+describe('the declarations and the type errors come from the snapshot the build read, not from the disk (C3)', () => {
+  // The TypeScript host must read the snapshot: a build that read the disk would describe a file the manifest hash was not taken from.
+  const tagged = (value: string) => `${project.read('src/wave.gpu.ts')}\nexport const tag = '${value}';\n`;
+
+  it('an edit after the sources were read does not reach the declaration (.d.ts), while the JavaScript and the declaration agree', async () => {
+    project.write('src/wave.gpu.ts', tagged('before'));
+    const builder = createBuilder(resolveConfig({ root: project.root }), { afterSnapshot: () => project.write('src/wave.gpu.ts', tagged('after')) });
+    expect((await builder.run({})).ok).toBe(true);
+    expect(project.read('shaders-dist/wave.gpu.js')).toContain('"before"');
+    expect(project.read('shaders-dist/wave.gpu.d.ts')).toContain('"before"');
+    expect(project.read('shaders-dist/wave.gpu.d.ts')).not.toContain('after');
+  });
+
+  it('a type error in the sources that were read is reported even when the disk was fixed meanwhile, and one that appeared meanwhile is not', async () => {
+    const config = resolveConfig({ root: project.root });
+    const broken = `${project.read('src/wave.gpu.ts')}\nexport const wrong: number = 'text';\n`;
+    project.write('src/wave.gpu.ts', broken);
+    const fixedMeanwhile = createBuilder(config, { afterSnapshot: () => project.write('src/wave.gpu.ts', project.read('src/wave.gpu.ts').replace("'text'", '1')) });
+    const first = await fixedMeanwhile.run({});
+    expect(first.ok).toBe(false);
+    expect(first.diagnostics.map((d: { text: string }) => d.text).join('\n')).toContain("Type 'string' is not assignable to type 'number'");
+
+    project.write('src/wave.gpu.ts', project.read('src/wave.gpu.ts').replace('= 1;', "= 1; // fixed"));
+    const brokenMeanwhile = createBuilder(config, { afterSnapshot: () => project.write('src/wave.gpu.ts', broken) });
+    expect((await brokenMeanwhile.run({})).ok).toBe(true);
+  });
+});
+
 describe('what the output depends on is part of the cache key', () => {
   it('a change of the tsconfig is not "fresh" (declarations follow it)', async () => {
     await buildShaders({ root: project.root });
