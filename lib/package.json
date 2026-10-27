@@ -14,6 +14,9 @@
     "typescript": ">=5.5.0",
     "unplugin-typegpu": "^0.12.6"
   },
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
   "sideEffects": false,
   "bin": {
     "typegpu-shaders": "./tools/typegpu-shaders/cli.mjs",

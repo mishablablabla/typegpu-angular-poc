@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+/** The Node range the package declares: the lowest versions of the Angular 20 and 21 CLIs (`^20.19.0 || ^22.12.0 || >=24.0.0`), the widest of the supported majors. Keep in step with lib/package.json and package.spec.ts. */
+const NODE_RANGE = '^20.19.0 || ^22.12.0 || >=24.0.0';
 const args = process.argv.slice(2);
 const flag = (name) => {
   const i = args.indexOf(name);
@@ -193,6 +195,9 @@ if (manifest) {
   for (const key of ['name', 'version', 'license', 'description', 'private', 'sideEffects', 'dependencies', 'peerDependencies', 'peerDependenciesMeta', 'bin', 'schematics', 'builders', 'ng-add', 'engines']) {
     check(JSON.stringify(sortKeys(manifest[key])) === JSON.stringify(sortKeys(sourceManifest[key])), `package.json "${key}" differs from ${relative(process.cwd(), sourcePath)}`);
   }
+  // The Node range is declared (the supported Angular majors 20 to 22 need Node 20.19, 22.12 or 24 at the least; each Angular major enforces its own,
+  // tighter range itself), and it is the one lib/schematics/testing/builders/package.spec.ts expects.
+  check(manifest.engines?.node === NODE_RANGE, `package.json "engines.node" must be "${NODE_RANGE}" (found ${JSON.stringify(manifest.engines?.node)})`);
   for (const key of ['scripts', 'devDependencies']) check(!(key in manifest), `package.json must not contain "${key}"`);
   check(manifest.type === 'module' && Boolean(manifest.exports?.['.']) && Boolean(manifest.exports?.['./testing']), 'package.json: type/exports (".", "./testing") missing');
 
