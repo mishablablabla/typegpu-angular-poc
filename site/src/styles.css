@@ -1,0 +1,488 @@
+@import '@fontsource-variable/instrument-sans';
+@import '@fontsource-variable/jetbrains-mono';
+
+/*
+ * Design tokens follow the TypeGPU docs (Starlight with the TypeGPU overrides): navy surfaces, the periwinkle/purple accent,
+ * square corners, 1px hairlines. Aeonik is a licensed typeface, so it is only used when it is installed locally;
+ * Instrument Sans (OFL) stands in for it.
+ */
+:root {
+  --sl-font: 'Aeonik', 'Instrument Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sl-line-height: 1.75;
+  --sl-nav-height: 5rem;
+  --sl-sidebar-width: 18.75rem;
+  --sl-content-width: 45rem;
+
+  --gradient-purple: #c464ff;
+  --gradient-purple-dark: #a91eff;
+  --gradient-blue: #1d72f0;
+  --gradient-blue-dark: #0058dd;
+  --accent-200: #c3c4f1;
+  --accent-600: #6453d2;
+  --accent-900: #2e295f;
+  --accent-950: #211f41;
+  /* Keyboard focus ring: at least 3:1 against the surfaces of each theme (the accent #6453d2 is only 2.5-2.9:1 on the dark ones). */
+  --focus-ring: #9db5ff;
+  color-scheme: dark;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-bg: #232736;
+  --sl-color-bg-nav: #232736;
+  --sl-color-bg-sidebar: #232736;
+  --sl-color-hairline: #353452;
+  --sl-color-white: #fcfcff;
+  --sl-color-gray-1: #edeff6;
+  --sl-color-gray-2: #c7cbd7;
+  --sl-color-gray-3: #8788aa;
+  --sl-color-gray-5: #353452;
+  --sl-color-gray-6: #1f2330;
+  --sl-color-text: #c7cbd7;
+  --sl-color-text-accent: #9db5ff;
+  --sl-color-text-invert: #211f41;
+  --sl-color-bg-inline-code: #2b2f40;
+  --sl-color-accent: #6453d2;
+  --sl-color-accent-low: #211f41;
+  --sl-color-accent-high: #c3c4f1;
+  --sl-color-note-low: #1e2a40;
+  --sl-color-note: hsl(234, 100%, 60%);
+  --sl-color-note-high: hsl(234, 100%, 87%);
+  --sl-color-tip-low: #2b2540;
+  --sl-color-tip: hsl(281, 82%, 63%);
+  --sl-color-tip-high: hsl(281, 82%, 89%);
+  --sl-color-caution-low: #3a2d1f;
+  --sl-color-caution: hsl(41, 82%, 63%);
+  --sl-color-caution-high: hsl(41, 82%, 87%);
+  --sl-color-danger-low: #40252b;
+  --sl-color-danger: hsl(339, 82%, 63%);
+  --sl-color-danger-high: hsl(339, 82%, 87%);
+  --header-bg: rgb(35 39 54 / 0.88);
+  --header-border: rgb(255 255 255 / 0.08);
+  --link-header: #f8f9ff;
+  --link-header-hover: #c3c4f1;
+
+  --ex-bg: #1b1f2c;
+  --ex-surface: #232736;
+  --ex-panel: #272b3c;
+  --ex-preview: #171a25;
+  --ex-border: rgb(255 255 255 / 0.1);
+  --ex-field: #1b1f2c;
+  --ex-button: #34394d;
+  --ex-button-hover: #3d435a;
+  --ex-button-text: #f8f9ff;
+  --ex-chip: rgb(255 255 255 / 0.06);
+  --ex-chip-text: #bfc0d2;
+  --ex-muted: #bfc0d2;
+  --ex-title: #fcfcff;
+  --ex-tab-bar: #1b1f2c;
+  --ex-tab-active: #272b3c;
+  --ex-tab-text: #8788aa;
+  --ex-hover: rgb(255 255 255 / 0.05);
+  --ex-current: rgb(255 255 255 / 0.1);
+  --ex-track: rgb(255 255 255 / 0.1);
+  --ex-code-bg: #1e1e2e;
+  --ex-code-gutter: #6c7086;
+  --ex-shadow: 0 10px 28px rgb(0 0 0 / 0.35);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --focus-ring: #6453d2;
+  --sl-color-bg: #f8f9ff;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #f8f9ff;
+  --sl-color-hairline: #e2e5f2;
+  --sl-color-white: #001a72;
+  --sl-color-gray-1: #001a72;
+  --sl-color-gray-2: #33488e;
+  --sl-color-gray-3: #757387;
+  --sl-color-gray-5: #e2e5f2;
+  --sl-color-gray-6: #eceef7;
+  --sl-color-text: #33488e;
+  --sl-color-text-accent: #6453d2;
+  --sl-color-text-invert: #ffffff;
+  --sl-color-bg-inline-code: #eceef7;
+  --sl-color-accent: #6453d2;
+  --sl-color-accent-low: #efedfa;
+  --sl-color-accent-high: #2e295f;
+  --sl-color-note-low: #eef1fb;
+  --sl-color-note: hsl(234, 90%, 60%);
+  --sl-color-note-high: hsl(234, 80%, 30%);
+  --sl-color-tip-low: #efedfa;
+  --sl-color-tip: hsl(281, 60%, 45%);
+  --sl-color-tip-high: hsl(281, 80%, 25%);
+  --sl-color-caution-low: #fbf1e6;
+  --sl-color-caution: hsl(41, 82%, 40%);
+  --sl-color-caution-high: hsl(41, 80%, 20%);
+  --sl-color-danger-low: #faecef;
+  --sl-color-danger: hsl(339, 80%, 45%);
+  --sl-color-danger-high: hsl(339, 80%, 25%);
+  --header-bg: rgb(255 255 255 / 0.88);
+  --header-border: rgb(42 10 102 / 0.1);
+  --link-header: #33488e;
+  --link-header-hover: #6453d2;
+
+  --ex-bg: #f8f9ff;
+  --ex-surface: #ffffff;
+  --ex-panel: #ffffff;
+  --ex-preview: #ffffff;
+  --ex-border: #e2e2f0;
+  --ex-field: #efeff9;
+  --ex-button: #ffffff;
+  --ex-button-hover: #ffffff;
+  --ex-button-text: #33488e;
+  --ex-chip: #efeff9;
+  --ex-chip-text: #515061;
+  --ex-muted: #515061;
+  --ex-title: #001a72;
+  --ex-tab-bar: #e2e2f0;
+  --ex-tab-active: #ffffff;
+  --ex-tab-text: #5f5d72;
+  --ex-hover: #efeff9;
+  --ex-current: #e2e2f0;
+  --ex-track: #efeff9;
+  --ex-code-bg: #ffffff;
+  --ex-code-gutter: #237893;
+  --ex-shadow: 0 10px 28px rgb(46 41 95 / 0.1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--sl-nav-height) + 1rem);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  font-family: var(--sl-font);
+  font-size: 1rem;
+  line-height: var(--sl-line-height);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+a {
+  color: var(--sl-color-text-accent);
+}
+
+::selection {
+  background: var(--accent-600);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.no-transition,
+.no-transition *,
+.no-transition *::before,
+.no-transition *::after {
+  transition-duration: 0s !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Documentation prose (Starlight's `.sl-markdown-content`) ---- */
+.sl-markdown-content {
+  font-size: 1rem;
+  line-height: 1.75;
+  color: var(--sl-color-text);
+}
+
+.sl-markdown-content > * + * {
+  margin-top: 1rem;
+}
+
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4 {
+  color: var(--sl-color-white);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.sl-markdown-content h2 {
+  font-size: 2.1875rem;
+  margin-top: 1.5em;
+}
+
+.sl-markdown-content h3 {
+  font-size: 1.8125rem;
+  margin-top: 1.5em;
+}
+
+.sl-markdown-content h4 {
+  font-size: 1.5rem;
+  margin-top: 1.5em;
+}
+
+.sl-markdown-content .heading-wrapper {
+  position: relative;
+}
+
+.sl-markdown-content .heading-wrapper > .anchor {
+  position: absolute;
+  inset-inline-start: -1.5em;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  width: 1.25em;
+  color: var(--sl-color-gray-3);
+  text-decoration: none;
+  font-size: 0.6em;
+  opacity: 0;
+}
+
+.sl-markdown-content .heading-wrapper:hover > .anchor,
+.sl-markdown-content .heading-wrapper > .anchor:focus {
+  opacity: 1;
+}
+
+.sl-markdown-content ul,
+.sl-markdown-content ol {
+  padding-inline-start: 1.5rem;
+}
+
+.sl-markdown-content li + li {
+  margin-top: 0.25rem;
+}
+
+.sl-markdown-content strong {
+  color: var(--sl-color-white);
+  font-weight: 600;
+}
+
+.sl-markdown-content :not(pre) > code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.8125rem;
+  background: var(--sl-color-bg-inline-code);
+  padding: 2px 6px;
+  margin: -2px 0;
+  color: var(--sl-color-text);
+  word-break: break-word;
+}
+
+.sl-markdown-content a {
+  color: var(--sl-color-text-accent);
+  text-decoration: underline;
+}
+
+.sl-markdown-content a:hover {
+  color: var(--sl-color-white);
+}
+
+.sl-markdown-content table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: var(--sl-text-sm, 0.875rem);
+}
+
+.sl-markdown-content th,
+.sl-markdown-content td {
+  border: 1px solid var(--sl-color-hairline);
+  padding: 0.5rem 0.75rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+.sl-markdown-content th {
+  color: var(--sl-color-white);
+  background: var(--sl-color-gray-6);
+}
+
+.sl-markdown-content hr {
+  border: 0;
+  border-top: 1px solid var(--sl-color-hairline);
+  margin-block: 2rem;
+}
+
+/* ---- Highlighted code (Shiki output; colors come from per-token CSS variables set for the light and dark theme) ---- */
+.shiki {
+  margin: 0;
+  padding: 12px 0;
+  overflow-x: auto;
+  background: transparent !important;
+  font-family: var(--sl-font-mono);
+  font-size: 0.875rem;
+  line-height: 1.75;
+  tab-size: 2;
+  color: #d6deeb;
+}
+
+:root[data-theme='light'] .shiki {
+  color: #403f53;
+}
+
+.shiki code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding-inline: 1rem;
+  font-family: inherit;
+}
+
+.shiki span {
+  color: var(--shiki-dark);
+}
+
+:root[data-theme='light'] .shiki span {
+  color: var(--shiki-light);
+}
+
+/* ---- Notices and spinner shown by the example scenes while the GPU is starting or unavailable ---- */
+.gpu-notice {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  height: 100%;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--ex-muted, var(--sl-color-text));
+}
+
+.gpu-notice-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--ex-title, var(--sl-color-white));
+}
+
+.gpu-notice p {
+  margin: 0;
+  max-width: 28rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.gpu-notice button {
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--ex-border);
+  background: var(--ex-button);
+  color: var(--ex-button-text);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.gpu-notice button:hover {
+  border-color: var(--accent-200);
+}
+
+.gpu-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2rem;
+  height: 2rem;
+  margin: -1rem 0 0 -1rem;
+  border: 3px solid color-mix(in srgb, var(--accent-600) 25%, transparent);
+  border-top-color: var(--accent-600);
+  border-radius: 9999px;
+  animation: gpu-spin 0.8s linear infinite;
+}
+
+@keyframes gpu-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Reduced motion: the spinner does not turn (it is still announced as a status), and transitions are near-instant. */
+@media (prefers-reduced-motion: reduce) {
+  .gpu-spinner {
+    animation: none;
+    border-color: color-mix(in srgb, var(--accent-600) 60%, transparent);
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Source viewer: line numbers (an editor-like gutter) and the editor font size of the TypeGPU examples page. */
+.shiki.numbered {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  counter-reset: line;
+  padding-block: 0.5rem;
+}
+
+.shiki.numbered code {
+  padding-inline: 0;
+}
+
+.shiki.numbered .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3.25rem;
+  padding-inline-end: 1.1rem;
+  text-align: end;
+  color: var(--ex-code-gutter);
+  opacity: 0.7;
+  user-select: none;
+}
+
+html[data-examples-fullscreen] app-site-header {
+  display: none;
+}
+
+/* Skip link: the first tab stop, visible only while it has focus. */
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text-accent);
+  border: 1px solid var(--focus-ring);
+  transform: translateY(-300%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+main:focus {
+  outline: none;
+}

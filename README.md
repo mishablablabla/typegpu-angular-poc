@@ -23,10 +23,11 @@ An alternative core design for the prebuild (a generated file next to each shade
 |---|---|
 | `lib/` | The library: `src/` (service, resources, frame loop, canvas directive), `testing/` (fake GPU helpers, secondary entry point), `tools/` (the shader plugin, the `typegpu-shaders` tool and the bundle check, shipped with the package), `builders/` (the wrapper builders and their option schemas), `schematics/` (`ng add` and the component generator) and the specs of all of that (`schematics/testing/`). Built with ng-packagr plus `tsc` for the schematics. |
 | `app/` | Development consumer app. Installs the **built package** (not the sources) and holds the library's specs (`src/lib-tests`), the shader tripwire spec, and examples. |
+| `site/` | Showcase site: the documentation page and six live examples, each with and without the integration (`site/README.md`). Built and tested by `.github/workflows/site.yml` against the tarball packed from the same commit; publishing to GitHub Pages is a manual step (`site/DEPLOY.md`). |
 | `app-ssr/` | The same package under SSR with hydration (`@angular/ssr`). |
 | `scripts/` | `build-lib-and-install.sh`, `verify-package.mjs` (the packed-tarball contract), the acceptance runs (`acceptance-clean-consumer.sh`, `acceptance-npm-workspaces.sh`, `prebuild-e2e.sh`), and checks for the plugin, watch mode and diagnostics (`verify-shader-plugin.mjs`, `verify-shader-watch.mjs`, `verify-diagnostics.sh`, `probes/`). |
 | `docs/` | Architecture decisions, the shader build alternatives, the prebuild log, the React comparison. |
-| `.github/workflows/ci.yml` | CI, described below. |
+| `.github/workflows/ci.yml`, `.github/workflows/site.yml` | CI, described below; the site build and the manual Pages deployment. |
 
 ## Everyday commands
 

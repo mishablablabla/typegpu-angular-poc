@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <title>@typegpu/angular | TypeGPU</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Angular integration for TypeGPU: documentation and live examples with their source, with and without the integration." />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <script>
+      // Apply the stored (or system) theme before the first paint. Same storage key as the TypeGPU docs.
+      (function () {
+        var stored = null;
+        try { stored = localStorage.getItem('starlight-theme'); } catch (e) {}
+        var theme = stored === 'light' || stored === 'dark' ? stored : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+  </head>
+  <body>
+    <app-root></app-root>
+  </body>
+</html>
