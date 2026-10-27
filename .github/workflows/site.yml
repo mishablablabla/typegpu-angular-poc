@@ -1,0 +1,101 @@
+name: Site
+
+# Builds and tests the showcase site against the library tarball packed from the same commit. Publishing to GitHub Pages is a separate,
+# manual step (workflow_dispatch with `deploy`), and needs Pages to be enabled by the repository owner (Settings > Pages > Source: GitHub Actions).
+on:
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'lib/**'
+      - '.github/workflows/site.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'lib/**'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Publish the built site to GitHub Pages (needs Pages enabled with the source "GitHub Actions")'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NG_CLI_ANALYTICS: 'false'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build and test the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Pack the library from this commit
+        working-directory: lib
+        run: |
+          npm ci
+          npm run pack
+      - name: Verify the tarball
+        run: node scripts/verify-package.mjs lib/typegpu-poc-angular-*.tgz
+      # site/package-lock.json pins every third-party package and not the library under test (same design as app/, docs/DECISIONS.md D11)
+      - name: Install the site dependencies, then the packed library
+        working-directory: site
+        run: |
+          npm ci
+          npm install --no-save ../lib/typegpu-poc-angular-*.tgz
+      - name: The installed library is the packed one
+        run: node scripts/verify-package.mjs lib/typegpu-poc-angular-*.tgz --installed site/node_modules/@typegpu-poc/angular
+      - name: Tests
+        working-directory: site
+        run: npx ng test --watch=false
+      - name: Production build for GitHub Pages (base href /typegpu-angular-poc/)
+        working-directory: site
+        run: npx ng build --configuration production --base-href /typegpu-angular-poc/
+      - name: Every 'use gpu' directive in the bundle was transformed
+        working-directory: site
+        run: node node_modules/@typegpu-poc/angular/tools/check-shader-bundle.mjs dist/site/browser
+      - name: Single-page fallback and no Jekyll
+        working-directory: site/dist/site/browser
+        run: |
+          cp index.html 404.html
+          touch .nojekyll
+      - name: Nothing tracked was modified by the job
+        run: git diff --exit-code
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy
+        with:
+          path: site/dist/site/browser
+
+  deploy:
+    name: publish to GitHub Pages
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
