@@ -99,3 +99,40 @@ A regression test I wrote for L2 built with `out: '.'` in a temp project whose `
 | Command | Exit | Result |
 |---|---|---|
 | `cd app && NG_CLI_ANALYTICS=false npx ng test --watch=false` | 0 | 13 files, **166 tests passed** (baseline-style record, worktree before final changes; app/ uses its own installed copy of the library, not the new tarball) |
+
+---
+
+# Round 2 — production-readiness run (2026-10-27)
+
+Environment: macOS arm64 (Darwin 25.3), Node 24.21.0, npm 11.19.0, pnpm 12.10.x, headless Chrome 156 with WebGPU on Metal; Linux through Docker (`node:24`, `node:22`, as a non-root and as root user); Windows and Linux/macOS CI on GitHub Actions. Method: independent read-only audit lanes in scratch clones of the committed state, every proposed fix re-implemented and re-verified by the lead in the repository, regression tests mutation-checked, then CI.
+
+## Lanes and what each established (commands and outcomes are in the lane's own sandbox; this is the ledger of results)
+| Lane | Scope | Result |
+|---|---|---|
+| CI reproducibility | pack reproducibility, tarball/lockfile designs, workflow audit | `npm pack` is byte-identical across directories, rebuilds, macOS, Linux arm64/x64 and Node 22/24 (same sha512); the committed lockfile hash never matched even on the author's machine; the "delete the hash in CI" workaround left stale metadata (bins not linked); 5 designs tried (directory symlink: 139 of 166 specs fail; install-links; workspaces; committed hash; no dependency in the lockfile + `--no-save`): the last chosen (D11); action SHAs verified through the GitHub API |
+| Windows CLI | spawning, quoting, shims, signals, env, paths | `command.mjs` designed and fuzzed against cross-spawn (400k random arguments) and a cmd.exe model; POSIX behaviour verified on a real pty; the two skipped tests identified exactly (see `QA_FINDINGS.md`, "Skipped tests"); every Windows branch is unit-tested through a `platform` parameter and 7 tests run against real `cmd.exe` in CI |
+| Findings | every row of `QA_FINDINGS.md` against the code | 60+ rows re-judged with a revert-check or a real-CLI run; stale or wrong documentation statements listed and corrected (see the docs); B1/B2/F-L5/L3/C9/B3/B5/B8/F-L7/E2/E5 found fixable and fixed |
+| Tests | skips, flakes, isolation, mutation | about 100 mutants (6 real survivors, covered or killed by new tests), 5 sequential + concurrent + shuffled + loaded full runs, leak found (`hash.spec`), a latent overwrite of a real `@angular/build` through a link in the fake-build helper, an order-dependent app tripwire test: all fixed |
+| e22 / e2021 | real `ng` workflows on Angular 22.2.4 / 21.2.28 / 20.3.41, both modes | tables of ~25 scenarios each (build, test, serve + edit/break/recover, SSR, hydration, workers, extract-i18n, idempotency, refusals, concurrency, kill, pnpm); WebGPU rendering verified in headless Chrome on Metal for Angular 22 (production, `ng serve`, SSR server); defects found: SSR dev server bricked by the throwing stub (X1), `extract-i18n` (F-L5), alias detection (B2), Angular 20 SSR `security` (F-L2), papercuts |
+| Security | destructive operations, injection, supply chain | S1-S6 (see findings), proofs by crafted inputs; npm audit: 0 production vulnerabilities in `lib/` and the apps, 2 dev-server advisories in the Vite nested in `@angular/build` 22.2.x (dev only; wait for an Angular release) |
+| Implementation lanes | stub, i18n, alias, addux, winhard, port, port2 | each in its own clone, regression tests, mutation checks, real-CLI verification; merged by cherry-pick, conflicts resolved by the lead |
+| Hybrid experiment | sibling generation prototype | measured and compared (`docs/SHADER-BUILD-ALTERNATIVES.md`, Round 2); not adopted; prototype on `experiment/siblings-prototype` |
+
+## Verification at the final commit
+| What | Where | Result |
+|---|---|---|
+| `lib`: `npm ci`, both typechecks, `npm run test:schematics` | GitHub Actions: Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24 (run 40436990834 at `7f5a520`) | 22 files: Ubuntu 614 passed + 8 skipped (622), Windows 615 passed + 9 skipped (624) |
+| `pack` + `scripts/verify-package.mjs` | Ubuntu | passed; tarball uploaded and reused by the other jobs |
+| `app`: `npm ci`, `npm install --no-save <tarball>`, installed copy equals the tarball, `ng test`, `ng build`, bundle check | Ubuntu Node 24 and 22.22.3, Windows Node 24 | 13 files, 166 passed each; build and check passed |
+| acceptance (`ng new`, `ng add`, `ng generate`, builds, `ng test`, bundle check, plugin mode) | Ubuntu Node 24, Angular 20, 21, 22 | passed |
+| `prebuild-e2e` (27 checks, real CLI, prebuild mode) | Ubuntu Node 24, Angular 22 | all 27 passed |
+| `lib` suite, flake loops, leak guard | macOS (6 of 6 full runs, two concurrent suites for 3 rounds; five specs 15 of 15) and a Linux container (487 passed, 10 skipped as root) | passed; the run fails if a spec leaves a temporary folder |
+| Real-`ng` scenarios (serve, kill -9, concurrency, SSR, browser rendering) | macOS only, by hand/harness | see the lane tables above; state machine 48 of 48 on Angular 22.2.4 |
+
+CI defects found by the first runs of the new jobs and fixed: `tar | grep -q` under `pipefail` (SIGPIPE) in the acceptance script; npm 10's arborist crash in `ng new` for Angular 21 on Node 22 (acceptance moved to Node 24); on Windows: `URL.pathname` paths, the `Path`/`PATH` key, CRLF fixtures and CRLF output of an LF file, NTFS file ids not fitting a double, folder removal blocked by a just-killed process, a recursive-watcher event without a file name (W12).
+
+## Incidents (disclosed)
+- Round 1: a regression test of the lead emptied `lib/node_modules` once (restored with `npm ci`, lockfile unchanged) and wrote one probe file through a link (removed). Both tests were rewritten.
+- Round 2: five subagents were started with the harness's worktree isolation, which created their worktrees in the **TypeGPU monorepo** (the session's primary repository) instead of this one. Two reported the wrong repository at once; the other three were stopped by the lead within minutes, before they changed anything. Afterwards, read-only checks of the monorepo showed: no worktrees (`.git/worktrees` absent), no extra branches, an empty reflog since 2026-10-23, HEAD `bec5d554`, status the pre-existing `?? docs/` only. An empty, git-ignored `.claude/worktrees` directory remains there (it may pre-date the session). All later lanes used their own clones under the session's scratch directory.
+- A subagent ran one `pkill -f "node -e for"` to remove its own CPU burners (broader than allowed; no other process is known to have been affected) and several lanes left orphaned test processes, which were left alone, not killed by the lead.
+- The system temp folder still holds the old `typegpu-shaders-*` directories of aborted round 1 runs; they were not swept.

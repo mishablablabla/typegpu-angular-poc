@@ -1,5 +1,52 @@
 # QA_FINAL_REPORT.md — TypeGPU Angular integration (`@typegpu-poc/angular`)
 
+## Round 2 (2026-10-27): production-readiness report
+
+### 1. Verdict
+**Ready for its stated scope: an experimental, publicly visible proof of concept of an Angular integration, installable from a tarball. Not production-ready**, and it does not claim to be. What changed since round 1: the known defects of both rounds were fixed or explicitly classified, installation and CI are reproducible from a clean checkout, the supported workflows have evidence behind them on Angular 20, 21 and 22 in both shader modes, and Linux and Windows are covered at unit and integration level by CI. What still prevents a production claim (all real, none hidden): the prebuild mode depends on `@angular/build` exports that Angular marks experimental and keeps state on disk; the plugin mode depends on a community builder and an Angular implementation detail; the real-`ng` flows (serve, Ctrl-C, kill, concurrency, browser rendering) were run by hand on macOS and are not in CI; real Windows `ng` flows and a Windows console Ctrl-C are unverified; Yarn/PnP, pnpm/Yarn workspaces, Angular 19 and 23+, Safari and Firefox were not tested; the repository has no LICENSE file; nothing has run in the field.
+
+### 2. Changes made (meaningful ones; the ledger with IDs is `QA_FINDINGS.md`)
+- **Safety of the shader tool:** the output folder is not trusted (manifest entries validated; every write and removal must really lie inside `out`; links and junctions never followed; unpredictable `wx` temp names; `out` must stay inside the project), `--fix-imports` never writes through a link, path containment decided by `relative` (case-insensitive on Windows), retries for removals and renames, a watcher that survives `error` events and events without a file name.
+- **Commands:** `typegpu-shaders run|dev -- <cmd>` starts the command without a shell, with its own PATH/PATHEXT resolution, npm shims run through node, `cmd.exe` escaping as a fallback, correct exit codes and signal forwarding.
+- **Prebuild:** `extract-i18n` wrapper; shaders imported through a tsconfig alias refused before bundling (also in `serve`); server-safe stubs (an Angular 20/21 SSR dev server no longer answers 500 for ever after a broken shader); a failing shader step reported as such; TypeScript's scanner for imports; nested `@shaders` imports diagnosed.
+- **`ng add` / `ng generate`:** the stock resolve conditions written in plugin mode (B1: the plugin bundle now equals the stock builder's); Angular 20 SSR `security.allowedHosts` handled; CRLF, indentation and the final newline preserved; warnings for untested dependency versions; refusal of mixed modes; the check script only built from plain words; hints after `ng generate`; zoneless-aware generated spec.
+- **CI and packaging (D11):** the library is packed once on Linux, its contents verified by `scripts/verify-package.mjs`, and that exact tarball installed in every consumer job; `app/`'s lockfile no longer pins a tarball hash, nothing tracked is modified in CI, no integrity check is bypassed; actions pinned to SHAs, read-only permissions; jobs: `lib` (Ubuntu x2, Windows), `pack`, `app` (Ubuntu x2, Windows), `acceptance` (Angular 20/21/22), `prebuild-e2e` (27 checks).
+- **Tests:** about 290 new tests in round 2 (332 at the start, 622 on Ubuntu at the end), each mutation-checked; infrastructure hardened (private TMPDIR with a leak check, junctions, timeouts, `pool: forks`, no write-through of a fake build into a real package, order-independent app tripwire).
+- **Documentation:** `README.md`, `lib/README.md`, `docs/DECISIONS.md` (D11, D12), `docs/SHADER-BUILD-ALTERNATIVES.md` (measured hybrid), `QA_*`.
+- **Decision on the hybrid (sibling generation):** prototyped and measured; not adopted for now (D12); the prototype is kept on `experiment/siblings-prototype`.
+
+### 3. Verification (details and commands: `QA_EXECUTION_LOG.md`, "Round 2")
+- GitHub Actions at `7f5a520` (run 40436990834), all 11 jobs green: `lib` Ubuntu Node 24 and 22.22.3 (614 passed, 8 skipped), `lib` Windows Node 24 (615 passed, 9 skipped), `pack`, `app` x3 (166 passed each), `acceptance` Angular 20/21/22, `prebuild-e2e` (27/27).
+- By hand on macOS: both modes on Angular 20.3.41, 21.2.28 and 22.2.4 (build, test, serve with edit/break/recover, SSR, hydration, workers, extract-i18n, refusals, idempotency); a state machine with real processes, 48/48; WebGPU rendering in headless Chrome on Metal (Angular 22, both modes); a Linux container for the prebuild flow script (Node 24 and 20.19).
+
+### 4. Skipped tests (exact)
+See `QA_FINDINGS.md`, "Skipped tests". In short: Linux skips the 7 real-`cmd.exe` tests and the case-rename test (a case-sensitive file system); Windows skips the 6 POSIX signal tests, the real-SIGINT stub test (`TerminateProcess`, W2) and 2 `chmod` tests. All remain, each with a stated reason; the stub-cleanup behaviour is additionally covered on every platform by portable per-signal tests.
+
+### 5. Packaging and the lockfile
+The committed `app/package-lock.json` pinned the integrity of a locally packed tarball that never matched a rebuilt one, so `npm ci` failed on a clean checkout; the first CI answer deleted that hash in the runner and left stale metadata. Replaced by D11: the library is not in `app/`'s lockfile, the tarball is added with `--no-save` after `npm ci` and checked byte for byte against the verified tarball.
+
+### 6. Known limitations (verified) and what is untested
+Verified limitations: web workers in plugin mode; Karma on Angular 20 does not transform shaders in plugin mode; the plugin mode's dev server reloads the page; the prebuild's `@shaders/...` imports are unresolved in editors until a first build; vector operators fail type checks (TS2365); a transform error without a line names the candidate lines; Angular 19 stops in npm before the schematic. Open findings: A5b, B6 (two typegpu copies bundled when a shader lives outside the app), B7 (the modes transform different file sets), C11 (deleting `shaders-dist` under a running `ng serve`), D4, F-L6, E7 (no LICENSE). Untested, not unsupported: Windows real `ng` flows and console Ctrl-C, Yarn 2+/PnP, pnpm/Yarn workspaces, Angular 19 and 23+, TypeScript 7, Safari, Firefox, a real locked file on Windows, a library project through ng-packagr with generated files.
+
+### 7. Git state
+Branch `feat/angular-prebuild-shaders-qa`, PR #1 (draft) into `main`; the working tree has only the intentionally untracked local material (`site/`, `experiments/`, `perf/`, presentation files, and the performance notes); nothing is published to npm, no release, no tag.
+
+### 8. Repository safety
+The main TypeGPU repository was not modified (HEAD `bec5d554`, status `?? docs/`). A harness fault created agent worktrees in it for a few minutes without changing any file; see "Incidents" in `QA_EXECUTION_LOG.md`.
+
+### 9. Remaining work (only what blocks readiness or was deferred)
+1. Windows: a real `ng serve`/build/Ctrl-C run (a self-hosted or manual session) and a real locked-file test.
+2. A LICENSE file (owner's decision; the manifest says MIT).
+3. Move the real-`ng` serve/kill/concurrency scenarios into CI (a nightly job) so they stop being manual.
+4. Re-evaluate the sibling-generation design after a Windows/Linux evidence round for the prototype (D12).
+5. Watch Angular releases: the wrappers and the schema copies need a sync per major (`scripts/sync-builder-schemas.mjs`).
+
+---
+
+# Round 1 report (2026-10-26, historical)
+
+*Kept as it was written; several statements are superseded by round 2 (CI exists, Linux and Windows are covered at unit level, B1/B2/F-L5 and others are fixed, the tarball/lockfile design changed).*
+
 Date 2026-10-26. QA Lead run. Environment: macOS arm64 (Darwin 25.3), Node 24.21.0 (also Node 22.23, 20.20, 26.10 in lane F), npm 11.19.0, pnpm 12.10.1, Chrome 155 (headless) and an embedded Chromium with WebGPU. Packages under test: packed tarballs built from the worktree: `d8d71d75…` (before fixes, tested by lanes A–F), final `3387afde…a6fa47a` (pack6, tested by the Lead after the fixes). Detailed ledgers: `QA_PLAN.md` (contract, matrix, lanes), `QA_FINDINGS.md` (every finding), `QA_EXECUTION_LOG.md` (commands and results).
 
 ## 1. Executive summary
