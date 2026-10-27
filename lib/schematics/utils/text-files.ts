@@ -65,12 +65,17 @@ const TRACKED = ['angular.json', 'package.json', '.gitignore'];
 
 export function keepFormatting(rule: Rule): Rule {
   const crlf = new Set<string>();
+  const noCr = new Set<string>();
   let manifest: string | undefined;
   const capture: Rule = (tree) => {
     crlf.clear();
+    noCr.clear();
     manifest = tree.exists('package.json') ? tree.readText('package.json') : undefined;
     for (const file of TRACKED) {
-      if (tree.exists(file) && isCrlf(tree.readText(file))) crlf.add(file);
+      if (!tree.exists(file)) continue;
+      const text = tree.readText(file);
+      if (isCrlf(text)) crlf.add(file);
+      else if (!text.includes('\r')) noCr.add(file);
     }
   };
   const restore: Rule = (tree) => {
@@ -84,6 +89,13 @@ export function keepFormatting(rule: Rule): Rule {
       const text = tree.readText(file);
       const fixed = text.replace(/\r?\n/g, '\r\n');
       if (fixed !== text) tree.overwrite(file, fixed);
+    }
+    // A file without any CR stays without: Angular's workspace writer takes the platform's line ending (CRLF on Windows) when the file has
+    // no line break to copy it from (a one-line angular.json), which would turn an LF file into a CRLF one.
+    for (const file of noCr) {
+      if (!tree.exists(file)) continue;
+      const text = tree.readText(file);
+      if (text.includes('\r\n')) tree.overwrite(file, text.replace(/\r\n/g, '\n'));
     }
   };
   return chain([capture, rule, restore]);

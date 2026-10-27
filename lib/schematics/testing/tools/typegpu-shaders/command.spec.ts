@@ -435,7 +435,8 @@ beforeEach(() => {
   writeFileSync(join(root, 'package.json'), '{"name":"fixture"}'); // no shader module: `run` and `dev` just run the command
   writeFileSync(join(root, 'argv.cjs'), `require('fs').writeFileSync('argv.json', JSON.stringify(process.argv.slice(2)));\n`);
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+// Windows: the folder is the working directory of a process that taskkill has only just ended, and cannot be removed until it is gone
+afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
 
 const cli = (args: string[], options: { input?: string; env?: NodeJS.ProcessEnv } = {}) => {
   const result = spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', timeout: 60_000, env: { ...process.env, ...options.env }, input: options.input });
