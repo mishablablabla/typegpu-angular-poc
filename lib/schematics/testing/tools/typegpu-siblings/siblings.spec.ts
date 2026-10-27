@@ -286,6 +286,13 @@ describe('writing next to the sources is safe', () => {
     expect(found.entries.map((p: string) => posix(p).split('/src/')[1])).toEqual(['wave.gpu.ts']);
   });
 
+  it('a suffix that would make every source file a shader module is refused; folders that start with a dot are not scanned', async () => {
+    expect(() => resolveConfig({ root: project.root, suffix: '.ts' })).toThrow(/suffix/);
+    project.write('src/.cache/c.gpu.ts', 'export const c = 1;\n');
+    await generate(config());
+    expect(project.exists('src/.cache/c.gpu.generated.js')).toBe(false);
+  });
+
   it('`src` that is a link out of the project is refused', () => {
     const elsewhere = mkdtempSync(join(tmpdir(), 'siblings-elsewhere-'));
     try {
