@@ -365,6 +365,57 @@ describe('runCommand: signals and the end of the child', () => {
     expect(await done).toBe(143);
   });
 
+  // Found by the flake loop under load: a test that signals the tool as soon as the command's first output appears killed the tool by the
+  // signal's default action now and then, leaving the command running. The command was started first and the handlers installed after it:
+  // a parent that is held up between the two (a loaded machine) has no handler yet when the signal comes.
+  it('has the signal handlers in place before the child is started', async () => {
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn(), pid: 4242 });
+    const proc = Object.assign(new EventEmitter(), { stdin: { isTTY: false }, stdout: { isTTY: false }, stderr: { isTTY: false } });
+    const seen: Record<string, number> = {};
+    const done = runCommand(['tool', 'x'], '/proj', {
+      platform: 'linux',
+      env: { PATH: '/bin' },
+      fs: POSIX,
+      proc,
+      log: vi.fn(),
+      spawnImpl: () => {
+        for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) seen[name] = proc.listenerCount(name);
+        return child;
+      },
+    });
+    expect(seen).toEqual({ SIGINT: 1, SIGTERM: 1, SIGHUP: 1 });
+    child.emit('exit', 0, null);
+    await done;
+  });
+
+  it('a signal that arrives before the child has been started is passed on to it as soon as it is', async () => {
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn(), pid: 4242 });
+    const proc = Object.assign(new EventEmitter(), { stdin: { isTTY: false }, stdout: { isTTY: false }, stderr: { isTTY: false } });
+    const done = runCommand(['tool', 'x'], '/proj', {
+      platform: 'linux',
+      env: { PATH: '/bin' },
+      fs: POSIX,
+      proc,
+      sharesTerminal: false,
+      log: vi.fn(),
+      spawnImpl: () => {
+        proc.emit('SIGTERM', 'SIGTERM'); // while the child is being started
+        return child;
+      },
+    });
+    expect(child.kill.mock.calls.map(([signal]: string[]) => signal)).toEqual(['SIGTERM']);
+    child.emit('exit', null, 'SIGTERM');
+    expect(await done).toBe(143);
+    expect(proc.eventNames()).toEqual([]);
+  });
+
+  it('a child that cannot be started leaves no signal listener behind', async () => {
+    const proc = new EventEmitter();
+    const code = await runCommand(['tool'], '/proj', { platform: 'linux', env: { PATH: '/bin' }, fs: POSIX, log: vi.fn(), proc, spawnImpl: () => { throw Object.assign(new Error('bad'), { code: 'EINVAL' }); } });
+    expect(code).toBe(126);
+    expect(proc.eventNames()).toEqual([]);
+  });
+
   it('does not send the child a second SIGINT after a Ctrl-C in a terminal (the terminal sent it to the whole group)', async () => {
     const { child, proc, done } = setup('linux', { sharesTerminal: true });
     proc.emit('SIGINT', 'SIGINT');

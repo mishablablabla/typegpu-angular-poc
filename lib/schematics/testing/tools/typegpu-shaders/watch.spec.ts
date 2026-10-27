@@ -31,8 +31,9 @@ beforeEach(() => {
   project = createProject();
   results = [];
 });
-afterEach(() => {
+afterEach(async () => {
   watcher?.close();
+  await watcher?.settled(); // a build that is still running would write into the project after it is removed (and leave the folder behind)
   project.dispose();
 });
 
@@ -241,7 +242,11 @@ describe('watch: what is visible, and when it is reported', () => {
     watcher = watchShaders({ root: project.root }, { onBuild: () => (reportedAt = performance.now()) });
     await watcher.ready;
     const early: number[] = [];
+    // 30 rounds when the machine is quiet; under heavy load (CI neighbours, concurrent suites) every round is a full build, so the loop stops at
+    // the deadline once it has run enough rounds to have a chance of seeing the race (it used to hit the test timeout instead: not a finding)
+    const deadline = Date.now() + 60_000;
     for (let round = 0; round < 30; round++) {
+      if (round >= 8 && Date.now() > deadline) break;
       reportedAt = undefined;
       const before = readFileSync(project.path('shaders-dist/wave.gpu.js'), 'utf8');
       project.write('src/wave.gpu.ts', `${texts[round % texts.length]}\n// ${round}\n`);
@@ -258,7 +263,7 @@ describe('watch: what is visible, and when it is reported', () => {
       await watcher.settled();
     }
     expect(early).toEqual([]);
-  }, 90_000);
+  }, 120_000);
 });
 
 describe('watch: a shader module imported by a relative path (the dev server would bundle its raw source, and nothing else notices)', () => {

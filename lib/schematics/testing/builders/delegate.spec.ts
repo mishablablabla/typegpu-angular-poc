@@ -3,10 +3,10 @@
 import { Architect, createBuilder, type Builder } from '@angular-devkit/architect';
 import { TestingArchitectHost } from '@angular-devkit/architect/testing';
 import { logging, schema } from '@angular-devkit/core';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BAD_SHADER, createProject, posix, SHADER, tsconfigWith, waitFor, type Project } from '../tools/typegpu-shaders/project';
+import { BAD_SHADER, createProject, link, posix, SHADER, tsconfigWith, waitFor, type Project } from '../tools/typegpu-shaders/project';
 
 const BUILDERS = join(__dirname, '..', '..', '..', 'builders');
 const FIXTURES = join(__dirname, '..', 'fixtures', 'angular-build');
@@ -43,8 +43,8 @@ function installFakeAngularBuild(exportsToSkip: string[] = []) {
   rmSync(modules); // the symlink the helper made
   mkdirSync(join(modules, '@angular'), { recursive: true });
   const lib = join(__dirname, '..', '..', '..', 'node_modules');
-  for (const entry of readdirSync(lib)) if (entry !== '@angular' && !entry.startsWith('.')) symlinkSync(join(lib, entry), join(modules, entry));
-  for (const entry of readdirSync(join(lib, '@angular'))) symlinkSync(join(lib, '@angular', entry), join(modules, '@angular', entry));
+  for (const entry of readdirSync(lib)) if (entry !== '@angular' && !entry.startsWith('.')) link(join(lib, entry), join(modules, entry));
+  for (const entry of readdirSync(join(lib, '@angular'))) link(join(lib, '@angular', entry), join(modules, '@angular', entry));
   const build = join(modules, '@angular', 'build');
   for (const name of ['application', 'dev-server', 'unit-test', 'karma', 'extract-i18n']) {
     mkdirSync(join(build, 'src', 'builders', name), { recursive: true });

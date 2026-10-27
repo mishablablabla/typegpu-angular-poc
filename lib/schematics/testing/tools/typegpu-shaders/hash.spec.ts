@@ -70,10 +70,11 @@ describe('the closure of shader modules', () => {
 });
 
 describe('a watcher leaves no process listeners behind', () => {
-  it.each(['exit', 'SIGINT', 'SIGTERM', 'SIGHUP', ...(process.platform === 'win32' ? ['SIGBREAK'] : [])])('%s', (event) => {
+  it.each(['exit', 'SIGINT', 'SIGTERM', 'SIGHUP', ...(process.platform === 'win32' ? ['SIGBREAK'] : [])])('%s', async (event) => {
     const before = process.listenerCount(event);
     const watcher = watchShaders({ root: project.root }, {});
     watcher.close();
+    await watcher.settled(); // the first build is already running: it must have ended before the project is removed (it recreated the folder after that)
     expect(process.listenerCount(event)).toBe(before);
   });
 });

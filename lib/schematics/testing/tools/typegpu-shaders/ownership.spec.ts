@@ -73,6 +73,7 @@ describe('the last shader module is deleted while the application still imports 
       await waitFor(() => !project.exists('shaders-dist/wave.gpu.js'), 'the stale output to be removed');
     } finally {
       watcher.close();
+      await watcher.settled(); // the rebuild that pruned is still writing its manifest: it must end before the project is removed
     }
   });
 });
@@ -163,6 +164,7 @@ describe('two watch sessions on one output folder: the one that ends does not de
       expect(project.read('shaders-dist/wave.gpu.js')).toContain('typegpu-shaders-error'); // the second session's page still needs it
     } finally {
       second.close();
+      await Promise.all([first.settled(), second.settled()]);
     }
     expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false);
   });
@@ -174,6 +176,7 @@ describe('two watch sessions on one output folder: the one that ends does not de
     const watcher = watchShaders({ root: project.root }, {});
     await watcher.ready;
     watcher.close();
+    await watcher.settled();
     expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false);
   });
 });

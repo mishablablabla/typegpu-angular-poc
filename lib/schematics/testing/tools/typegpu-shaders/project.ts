@@ -1,12 +1,20 @@
 // A throwaway project for the shader prebuild tests: a few sources, a tsconfig, and the package's own node_modules (esbuild, TypeScript,
 // Babel, unplugin-typegpu, typegpu) linked in, because the tool uses the project's copies.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // The tool reports paths relative to the project the way the platform writes them ('src\\wave.gpu.ts' on Windows); the tests compare them as POSIX.
 export const posix = (text: string) => text.replaceAll('\\', '/');
+
+/**
+ * A link to `target` that needs no privilege on Windows: a directory gets a JUNCTION (a directory symlink needs the "create symbolic links"
+ * right there, a junction does not; the type is ignored on other platforms), a file a plain symlink. Every link a test makes goes through here.
+ */
+export function link(target: string, path: string) {
+  symlinkSync(target, path, statSync(target).isDirectory() ? 'junction' : 'file');
+}
 
 export const CLI = join(__dirname, '../../../../tools/typegpu-shaders/cli.mjs');
 const NODE_MODULES = join(__dirname, '../../../../node_modules');
@@ -38,7 +46,7 @@ export type Project = ReturnType<typeof createProject>;
 
 export function createProject(files: Record<string, string> = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'typegpu-shaders-')));
-  symlinkSync(NODE_MODULES, join(root, 'node_modules'));
+  link(NODE_MODULES, join(root, 'node_modules'));
   const all: Record<string, string> = {
     'package.json': JSON.stringify({ name: 'fixture', type: 'module' }),
     'tsconfig.app.json': JSON.stringify({
@@ -59,10 +67,11 @@ export function createProject(files: Record<string, string> = {}) {
     },
     read: (path: string) => readFileSync(join(root, path), 'utf8'),
     exists: (path: string) => existsSync(join(root, path)),
-    remove: (path: string) => rmSync(join(root, path), { recursive: true, force: true }),
+    remove: (path: string) => rmSync(join(root, path), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }),
     /** Import a generated module (a new URL every time, so Node does not serve a cached copy). */
     import: (path: string) => import(/* @vite-ignore */ `${pathToFileURL(join(root, path)).href}?t=${Date.now()}${Math.random()}`),
-    dispose: () => rmSync(root, { recursive: true, force: true }),
+    // retries: on Windows a folder that a process has only just stopped using (a child that ended, a watcher that closed) is removable a moment later
+    dispose: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
   };
   for (const [path, text] of Object.entries(all)) project.write(path, text);
   return project;
