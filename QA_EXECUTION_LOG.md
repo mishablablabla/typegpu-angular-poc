@@ -122,7 +122,7 @@ Environment: macOS arm64 (Darwin 25.3), Node 24.21.0, npm 11.19.0, pnpm 12.10.x,
 ## Verification at the final commit
 | What | Where | Result |
 |---|---|---|
-| `lib`: `npm ci`, both typechecks, `npm run test:schematics` | GitHub Actions: Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24 (run 40436990834 at `7f5a520`) | 22 files: Ubuntu 614 passed + 8 skipped (622), Windows 615 passed + 9 skipped (624) |
+| `lib`: `npm ci`, both typechecks, `npm run test:schematics` | GitHub Actions: Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24 (run 40439829661 at `edf7d09`, after the independent review's fixes) | 22 files: Ubuntu 619 passed + 8 skipped (627), Windows 620 passed + 9 skipped (629) |
 | `pack` + `scripts/verify-package.mjs` | Ubuntu | passed; tarball uploaded and reused by the other jobs |
 | `app`: `npm ci`, `npm install --no-save <tarball>`, installed copy equals the tarball, `ng test`, `ng build`, bundle check | Ubuntu Node 24 and 22.22.3, Windows Node 24 | 13 files, 166 passed each; build and check passed |
 | acceptance (`ng new`, `ng add`, `ng generate`, builds, `ng test`, bundle check, plugin mode) | Ubuntu Node 24, Angular 20, 21, 22 | passed |
