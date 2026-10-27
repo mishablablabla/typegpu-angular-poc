@@ -577,7 +577,10 @@ describe('ng add: files with Windows line endings (CRLF)', () => {
   });
 
   it('does not turn LF files into CRLF', async () => {
-    const after = (await run(await workspaceWith())).tree;
+    // Angular's own schematics write the fixture with the platform's line ending (CRLF on Windows): make it LF first
+    const tree = await workspaceWith();
+    for (const file of ['angular.json', 'package.json']) tree.overwrite(file, tree.readText(file).replace(/\r\n/g, '\n'));
+    const after = (await run(tree)).tree;
     expect(after.readText('angular.json')).not.toContain('\r');
     expect(after.readText('package.json')).not.toContain('\r');
   });

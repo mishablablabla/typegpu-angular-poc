@@ -164,7 +164,7 @@ describe('errors are specific and a failed build cannot be mistaken for a good o
 describe('writing the output (other processes read the folder meanwhile: another build, Angular\'s watcher, an IDE)', () => {
   let project: Project;
   const out = () => project.path('shaders-dist');
-  const stats = () => Object.fromEntries(readdirSync(out()).filter((name) => !name.startsWith('.')).map((name) => [name, statSync(join(out(), name))]));
+  const stats = () => Object.fromEntries(readdirSync(out()).filter((name) => !name.startsWith('.')).map((name) => [name, statSync(join(out(), name), { bigint: true })]));
   beforeAll(async () => {
     project = createProject();
     await build(project);
@@ -185,7 +185,7 @@ describe('writing the output (other processes read the folder meanwhile: another
     project.write('src/wave.gpu.ts', SHADER.replace('std.sin(x) * SCALE', 'std.cos(x) * SCALE'));
     await build(project);
     const after = stats();
-    expect(after['wave.gpu.js']!.ino).not.toBe(before['wave.gpu.js']!.ino); // a new file took the old one's place
+    expect(after['wave.gpu.js']!.ino).not.toBe(before['wave.gpu.js']!.ino); // a new file took the old one's place (bigint: an NTFS file id does not fit a double, two ids would compare equal)
     expect(after['model.js']!.ino).toBe(before['model.js']!.ino); // what did not change was not touched
     expect(readdirSync(join(out(), '.tmp'))).toEqual([]);
   });
