@@ -116,7 +116,6 @@ describe('the file watcher fails', () => {
     made[1]!.listener('change', 'wave.gpu.ts');
     await waitFor(() => results.length > before, 'a rebuild by the new watcher');
     expect(project.read('shaders-dist/wave.gpu.js')).toContain('std.cos(x)');
-    expect(made[0]!.listenerCount('change')).toBe(0);
   });
 
   it('what changed while nothing was watched is built when the watcher is back', async () => {

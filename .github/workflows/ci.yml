@@ -17,9 +17,7 @@ concurrency:
 
 env:
   NG_CLI_ANALYTICS: 'false'
-  # 24: what the repo develops on (Angular 22 needs ^22.22.3 || ^24.15 || >=26). 22.22.3: the oldest Node Angular 22 accepts.
   NODE_CURRENT: '24'
-  NODE_MIN: '22.22.3'
 
 defaults:
   run:
@@ -57,6 +55,8 @@ jobs:
         run: npx tsc -p schematics/tsconfig.json --noEmit
       - name: Typecheck library
         run: npx tsc -p tsconfig.lib.json --noEmit
+      - name: Typecheck the specs and test helpers
+        run: npx tsc -p tsconfig.spec.json
       - name: Tests
         run: npm run test:schematics
 

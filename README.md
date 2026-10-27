@@ -35,7 +35,7 @@ Node: CI runs Node 24 and 22.22.3; the package declares `engines.node` `^20.19.0
 ```sh
 (cd lib && npm ci)                          # dependencies of the package (lockfile)
 (cd lib && npm run test:schematics)         # schematic, builder and tool specs: builds the schematics first, then vitest
-(cd lib && npx tsc -p schematics/tsconfig.json --noEmit && npx tsc -p tsconfig.lib.json --noEmit)   # typechecks
+(cd lib && npx tsc -p schematics/tsconfig.json --noEmit && npx tsc -p tsconfig.lib.json --noEmit && npx tsc -p tsconfig.spec.json)   # typechecks (the specs have their own)
 (cd app && npm ci)                          # dependencies of the consumer app (lockfile; the library is NOT in it, see below)
 ./scripts/build-lib-and-install.sh          # pack the library and install the tarball into app/ (rerun after every library change)
 (cd app && npx ng test --watch=false)       # library specs, run against the packed package
@@ -61,7 +61,7 @@ There is no pull request template and no contribution guide yet; changes go thro
 
 | Job | What it proves |
 |---|---|
-| `lib` (Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24) | `npm ci` (lockfile), both typechecks, `npm run test:schematics`: the specs of the schematics, the wrapper builders and the `typegpu-shaders` tool, which run real processes and real files in temporary projects |
+| `lib` (Ubuntu Node 24, Ubuntu Node 22.22.3, Windows Node 24) | `npm ci` (lockfile), the typechecks (schematics, library, and the specs and test helpers), `npm run test:schematics`: the specs of the schematics, the wrapper builders and the `typegpu-shaders` tool, which run real processes and real files in temporary projects |
 | `pack` (Ubuntu) | the library is packed **once** from the checkout; `scripts/verify-package.mjs` checks the tarball (every file the manifest, `collection.json` and `builders.json` point to exists, no specs or local paths, bin files executable with LF, manifest fields); the tarball is uploaded as an artifact |
 | `app` (Ubuntu Node 24 and 22.22.3, Windows Node 24) | downloads that exact tarball, `npm ci` in `app/` from its lockfile, `npm install --no-save` of the tarball, checks the installed copy is byte-identical to the tarball, then `ng test`, `ng build` and the shader bundle check; fails if a tracked package file changed |
 | `acceptance` (Angular 20, 21, 22; Ubuntu Node 24) | `ng new`, `ng add`, `ng generate`, builds, `ng test`, shader bundle check from the same tarball in plugin mode (`scripts/acceptance-clean-consumer.sh`) |

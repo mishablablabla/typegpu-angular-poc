@@ -63,8 +63,18 @@ Ledger of findings of the QA run. IDs: `L*` = Lead lane, `A`–`F` = lane letter
 | W8 | Windows: file ids (`ino`) do not fit a double (NTFS), two files could compare equal (a test failed; the case-twin check in `prune` is exposed to the same) | P3 | FIXED (compared as bigint) |
 | W9 | Windows: Angular's workspace writer takes the platform line ending for a file with no line break; an LF file became CRLF | P3 | FIXED (an LF file stays LF; 3 tests in `text-files.spec.ts`, mutation-checked) |
 | X1 | Prebuild + SSR `ng serve` (Angular 20, 21): after a broken shader the dev server answered 500 for ever (the stub threw on import); esbuild warned `import-is-undefined` | P2 | FIXED (round 2: on a server the stub only logs and exports the module's value names as placeholders that throw when used; verified 200 at every step on 21 and 20 SSR, 0 unhandled exceptions; tests in `watch.spec.ts`) |
-| X2 | `typegpu-shaders run\|dev -- <cmd>` used `shell:true` on Windows without quoting (injection-shaped; `.cmd` shims refused by Node >= 18.20.2) | P3 | FIXED in code (round 2: `command.mjs` starts the command without a shell, resolves PATH/PATHEXT itself, runs npm shims through node, escapes for `cmd.exe` otherwise; 90 tests, 83 run on macOS; the Windows branches ran in CI with real `cmd.exe`: 7 tests; a real Windows console Ctrl-C is NOT verified) |
+| X2 | `typegpu-shaders run\|dev -- <cmd>` used `shell:true` on Windows without quoting (injection-shaped; `.cmd` shims refused by Node >= 18.20.2) | P3 | FIXED in code (round 2: `command.mjs` starts the command without a shell, resolves PATH/PATHEXT itself, runs npm shims through node, escapes for `cmd.exe` otherwise; 93 tests, 86 run on macOS; the Windows branches ran in CI with real `cmd.exe`: 7 tests; a real Windows console Ctrl-C is NOT verified) |
 | X3 | A POSIX `typegpu-shaders run` ignored SIGTERM: the child stayed as an orphan; `dev` returned exit 0 after a signal | P3 | FIXED (signals forwarded, exit codes 128+n) |
+| R1 | Independent review of round 2: after a build refused for a module outside `src`, the manifest forgot what earlier builds had listed, so a shader deleted before it stayed importable and was bundled stale (`check` said "up to date") | P2 | FIXED (the list is kept while the files exist; regression test, mutation-checked) |
+| R2 | A dangling symlink (an editor's lock file `.#x.ts`) or a link loop anywhere under `src` made every build, check and watch cycle fail with a raw `ENOENT`/`ELOOP` | P3 | FIXED (such entries are skipped, folders are entered once by real path; test) |
+| R3 | `check --fix-imports` wrote through a **folder** link (the file itself was not a link) into a file outside the project, contradicting the documented guarantee | P3 | FIXED (`realpath(file) !== file` is skipped; test) |
+| R4 | `writeIfChanged` created folders before the containment check, leaving an empty folder behind a link | P4 | FIXED (check first, folders after; test) |
+| R5 | The acceptance scripts' `rm -rf` guard accepted `$root/acceptance/../..` | P4 | FIXED (`..` refused, the folder itself refused) |
+| R6 | A manifest name with a colon (drive-relative path, NTFS stream) passed the name filter on Windows | P4 | FIXED (colons refused; test) |
+| R7 | The specs and test helpers were never typechecked (the other tsconfigs exclude them) | P3 | FIXED (`lib/tsconfig.spec.json`, a CI step; five type errors found and fixed) |
+| R8 | `prebuild-e2e` check 9 and the acceptance negative check could pass for the wrong failure | P4 | FIXED (they now require the file name in the message / a finished build) |
+| R9 | `use-gpu-scan` does not see a directive in a method named like a control keyword (`catch(e) { 'use gpu' }` in a class) | P4 | OPEN, accepted (nobody names a shader method that way; the miss is silent) |
+| R10 | `sessions.mjs`: the pid of a dead session reused by another process counts as alive, so a stub may not be removed | P4 | OPEN, accepted (the next plain build fails on the stub, which is the safe direction) |
 
 ---
 
@@ -179,7 +189,7 @@ The QA run itself was macOS only. The first GitHub Actions run on Windows found:
 
 ## Skipped tests (exact, at the final commit of round 2)
 
-There is no `.skip`, `.todo`, `.only` or `runIf`, and no test returns early. Exactly these are conditional (`it.skipIf` / `describe.skipIf`):
+There is no `.skip`, `.todo`, `.only` or `runIf`, and no test returns early. Exactly these are conditional (`it.skipIf` / `describe.skipIf`, plus one runtime `context.skip()`):
 
 | Test | File | Skipped when | Why | Skipped on |
 |---|---|---|---|---|
@@ -187,6 +197,7 @@ There is no `.skip`, `.todo`, `.only` or `runIf`, and no test returns early. Exa
 | "Windows: shims, batch files and the injection-shaped arguments (real cmd.exe)" (7 tests) | `command.spec.ts` | not Windows | needs real `cmd.exe` and `.cmd` shims | Linux CI (7), macOS (7) |
 | "signals reach the command (POSIX)" (6 tests) | `command.spec.ts` | Windows | POSIX signals | Windows CI (6) |
 | "removes the stub on Ctrl-C (SIGINT), and the process still ends by the signal" | `watch.spec.ts` | Windows | `kill('SIGINT')` is `TerminateProcess` there (W2) | Windows CI (1) |
+| "a read-only output folder is named as not writable" (`delegate.spec.ts`, a runtime `context.skip()` when the write of a probe file succeeds) | `delegate.spec.ts` | the platform or the user ignores the folder mode (Windows, root) | `chmod` cannot make a folder read-only there | possibly Windows CI (**unverified**: if it skips there, Windows shows 10 skipped, not 9) and any root run |
 | two `watch-robustness.spec.ts` tests that make a folder unwritable with `chmod` (prune failure becomes a diagnostic; a session record that cannot be removed) | `watch-robustness.spec.ts` | Windows, or running as root | `chmod` does not stop root and does nothing on Windows | Windows CI (2); a root Docker run |
 
 Counts in CI at the final commit: Ubuntu 8 skipped (7 + 1), Windows 9 skipped (6 + 1 + 2). The earlier statement that "331 passed | 1 skipped" on both systems showed the same skip was an accident: they were two different tests (the case-rename test on Linux, the SIGINT test on Windows), so each regression test ran on only two of the three operating systems. That is no longer the case for the stub-cleanup behaviour (the portable per-signal tests run on every platform); the case-rename regression still runs only where the file system ignores case (macOS locally, Windows CI).

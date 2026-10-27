@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BAD_SHADER, CLI, createProject, posix, type Project } from './project';
+import { BAD_SHADER, CLI, createProject, link as linkDir, posix, type Project } from './project';
 
 let project: Project;
 beforeEach(() => {
@@ -134,6 +134,20 @@ describe('check --fix-imports and --help', () => {
     expect(fixed.code).toBe(0);
     expect(project.read('src/app/stray.ts')).toBe(`import { wave } from '@shaders/wave.gpu';\nexport const x = wave;\n`);
     expect(run(['check']).code).toBe(0);
+  });
+
+  it('does not write through a linked folder: a file behind a link is left alone, and check still fails on it', () => {
+    run(['build']);
+    const outside = join(project.root, 'outside');
+    mkdirSync(outside);
+    const victim = join(outside, 'victim.ts');
+    const text = `import { wave } from '../wave.gpu';\nexport const x = wave;\n`; // relative to src/linked/, where the scan finds the file
+    writeFileSync(victim, text);
+    linkDir(outside, join(project.root, 'src', 'linked')); // reached through src/linked/victim.ts
+    expect(run(['check']).err).toContain('@shaders/wave.gpu'); // the scan does see the stray import through the link
+    const result = run(['check', '--fix-imports']);
+    expect(readFileSync(victim, 'utf8')).toBe(text); // before the fix: rewritten, a file outside the project
+    expect(result.code).toBe(1); // and still reported
   });
 
   it('--help prints the commands and exits 0', () => {

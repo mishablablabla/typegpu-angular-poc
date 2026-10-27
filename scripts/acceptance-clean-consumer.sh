@@ -22,7 +22,8 @@ step() { printf '\n=== %s\n' "$*"; }
 
 # `rm -rf` below: only ever a folder under acceptance/ of this checkout, or one the caller names with ACCEPTANCE_FORCE=1
 case "$work" in
-  "$root"/acceptance/*) ;;
+  *..*) [ -n "${ACCEPTANCE_FORCE:-}" ] || { echo "refusing to delete $work: it contains '..' (set ACCEPTANCE_FORCE=1 to allow it)" >&2; exit 1; } ;;
+  "$root"/acceptance/?*) ;;
   *) [ -n "${ACCEPTANCE_FORCE:-}" ] || { echo "refusing to delete $work: it is not under $root/acceptance/ (set ACCEPTANCE_FORCE=1 to allow it)" >&2; exit 1; } ;;
 esac
 rm -rf "$work" && mkdir -p "$work"
@@ -151,7 +152,9 @@ node -e "
 const fs=require('fs');const ws=JSON.parse(fs.readFileSync('angular.json','utf8'));
 Object.values(ws.projects)[0].architect.build.configurations.production.plugins=[];
 fs.writeFileSync('angular.json',JSON.stringify(ws,null,2));"
-npx ng build --configuration production 2>&1 | grep -E "Application bundle|ERROR" || true
+# the build itself must succeed (the plugin is only disabled): otherwise the check below would also fail for an empty output folder
+npx ng build --configuration production > "$work/no-plugin-build.log" 2>&1 || { cat "$work/no-plugin-build.log"; echo "FAIL: the build with the plugin disabled did not finish"; exit 1; }
+grep -E "Application bundle|ERROR" "$work/no-plugin-build.log" || true
 if node "node_modules/$pkg_name/tools/check-shader-bundle.mjs" dist/demo/browser; then
   echo "FAIL: the shader check passed with the plugin disabled"; exit 1
 else
