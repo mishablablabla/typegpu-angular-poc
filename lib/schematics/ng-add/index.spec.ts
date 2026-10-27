@@ -623,3 +623,213 @@ describe('ng add: a workspace without an application', () => {
     await expect(ngAdd(tree, { project: 'shop' })).rejects.toThrow(/Project "shop" is not an application/);
   });
 });
+
+describe('ng add (plugin mode): resolve conditions (B1)', () => {
+  const conditionsOf = (tree: Awaited<ReturnType<typeof workspaceWith>>) => {
+    const build = target(tree, 'app', 'build');
+    return { options: build.options.conditions, production: build.configurations.production?.conditions, development: build.configurations.development?.conditions };
+  };
+
+  it('writes the conditions the stock builder uses into the production and development configurations, and says so once', async () => {
+    const tree = await workspaceWith();
+    const before = readJson(tree, 'angular.json').projects.app.architect.build;
+    const { tree: after, info } = await run(tree);
+    expect(conditionsOf(after)).toEqual({ options: undefined, production: ['module', 'production'], development: ['module', 'development'] });
+    // nothing else in the configurations changed
+    const { conditions: _p, ...production } = target(after, 'app', 'build').configurations.production;
+    const { conditions: _d, ...development } = target(after, 'app', 'build').configurations.development;
+    expect(production).toEqual(before.configurations.production);
+    expect(development).toEqual(before.configurations.development);
+    expect(info.match(/Set "conditions" in the build configurations of "app"/g)).toHaveLength(1);
+    expect(info).toMatch(/"production": \["module","production"\], "development": \["module","development"\].*empty list.*"default" file/s);
+  });
+
+  it('is idempotent: the second run is byte-identical and does not say it again', async () => {
+    const first = await run(await workspaceWith());
+    const text = { workspace: first.tree.readText('angular.json'), pkg: first.tree.readText('package.json') };
+    const second = await run(first.tree);
+    expect(second.tree.readText('angular.json')).toBe(text.workspace);
+    expect(second.tree.readText('package.json')).toBe(text.pkg);
+    expect(second.info).not.toContain('Set "conditions"');
+  });
+
+  it('leaves a project alone that sets conditions anywhere: in the build options, or in any configuration', async () => {
+    for (const place of ['options', 'production', 'development', 'staging']) {
+      const tree = await workspaceWith();
+      editJson(tree, 'angular.json', (json) => {
+        const build = json.projects.app.architect.build;
+        if (place === 'staging') build.configurations.staging = { conditions: ['custom'] };
+        else (place === 'options' ? build.options : build.configurations[place]).conditions = ['custom'];
+      });
+      const before = readJson(tree, 'angular.json').projects.app.architect.build;
+      const { tree: after, info } = await run(tree);
+      const build = target(after, 'app', 'build');
+      expect(info, place).not.toContain('Set "conditions"');
+      for (const name of ['production', 'development']) {
+        expect(build.configurations[name].conditions, `${place}/${name}`).toEqual(before.configurations[name].conditions);
+      }
+      expect(build.options.conditions).toEqual(before.options.conditions);
+    }
+  });
+
+  it('keeps an empty list too: setting `conditions: []` is the user\'s explicit choice', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.configurations.production.conditions = []));
+    expect(conditionsOf(await ngAdd(tree)).production).toEqual([]);
+  });
+
+  it('picks production or development by whether the configuration optimizes, as the stock builder does, not by its name', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      const { configurations } = json.projects.app.architect.build;
+      configurations.production.optimization = false;
+      configurations.development.optimization = { scripts: true, styles: false };
+    });
+    expect(conditionsOf(await ngAdd(tree))).toMatchObject({ production: ['module', 'development'], development: ['module', 'production'] });
+  });
+
+  it('writes only into the configurations that exist, and not into the options of a project without them', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => delete json.projects.app.architect.build.configurations.development);
+    expect(conditionsOf(await ngAdd(tree))).toEqual({ options: undefined, production: ['module', 'production'], development: undefined });
+    const bare = await workspaceWith();
+    editJson(bare, 'angular.json', (json) => delete json.projects.app.architect.build.configurations);
+    const { tree: after, info } = await run(bare);
+    expect(target(after, 'app', 'build').options.conditions).toBeUndefined();
+    expect(info).not.toContain('Set "conditions"');
+  });
+
+  it('also writes for an SSR project: the server bundle is built with the same option', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) =>
+      Object.assign(json.projects.app.architect.build.options, { server: 'src/main.server.ts', outputMode: 'server', ssr: { entry: 'src/server.ts' } }),
+    );
+    expect(conditionsOf(await ngAdd(tree))).toMatchObject({ production: ['module', 'production'], development: ['module', 'development'] });
+  });
+
+  it('only for the selected application', async () => {
+    const tree = await workspaceWith(['shop', 'admin']);
+    const after = await ngAdd(tree, { project: 'admin' });
+    expect(target(after, 'admin', 'build').configurations.production.conditions).toEqual(['module', 'production']);
+    expect(target(after, 'shop', 'build').configurations.production.conditions).toBeUndefined();
+  });
+
+  it('the prebuild mode does not write conditions (the stock builder keeps its defaults)', async () => {
+    const after = await ours().runSchematic('ng-add', { shaders: 'prebuild' }, await workspaceWith());
+    const build = target(after, 'app', 'build');
+    expect(build.configurations.production.conditions).toBeUndefined();
+    expect(build.configurations.development.conditions).toBeUndefined();
+  });
+});
+
+describe('ng add (plugin mode): a project that already uses the prebuild wrappers (any target) is refused', () => {
+  const WRAPPER_TARGETS = [
+    ['build', 'application'],
+    ['serve', 'dev-server'],
+    ['test', 'unit-test'],
+    ['test', 'karma'],
+    ['extract-i18n', 'extract-i18n'],
+  ] as const;
+
+  it.each(WRAPPER_TARGETS)('%s on the wrapper %s, every other target stock: refused, nothing written', async (name, wrapper) => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      const architect = json.projects.app.architect;
+      if (name === 'extract-i18n') architect['extract-i18n'] = {};
+      architect[name].builder = `@typegpu-poc/angular:${wrapper}`;
+    });
+    const before = { workspace: tree.readText('angular.json'), pkg: tree.readText('package.json') };
+    const message = await ngAdd(tree).then(
+      () => '',
+      (error: Error) => error.message,
+    );
+    expect(message).toMatch(/already set up for the shader prebuild.*The plugin mode and the prebuild do not mix.*first restore the stock builders in angular\.json.*then run ng add @typegpu-poc\/angular again.*npm uninstall @typegpu-poc\/angular/s);
+    expect(message).toContain(name === 'build' ? 'its build target is' : `its "${name}" target is "@typegpu-poc/angular:${wrapper}"`);
+    expect(tree.readText('angular.json')).toBe(before.workspace);
+    expect(tree.readText('package.json')).toBe(before.pkg);
+  });
+
+  it('a prebuild project whose build was moved back to stock but whose extract-i18n is still the wrapper', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect['extract-i18n'] = { builder: '@angular/build:extract-i18n' }));
+    const prebuilt = await ours().runSchematic('ng-add', { shaders: 'prebuild' }, tree);
+    editJson(prebuilt, 'angular.json', (json) => {
+      const architect = json.projects.app.architect;
+      architect.build.builder = '@angular/build:application';
+      architect.serve.builder = '@angular/build:dev-server';
+      architect.test.builder = '@angular/build:unit-test';
+    });
+    expect(target(prebuilt, 'app', 'extract-i18n').builder).toBe('@typegpu-poc/angular:extract-i18n');
+    const before = prebuilt.readText('angular.json');
+    await expect(ngAdd(prebuilt)).rejects.toThrow(/"extract-i18n" target is "@typegpu-poc\/angular:extract-i18n"/);
+    expect(prebuilt.readText('angular.json')).toBe(before);
+  });
+
+  it('only the selected project counts: another application on the prebuild does not block this one', async () => {
+    const tree = await workspaceWith(['shop', 'admin']);
+    editJson(tree, 'angular.json', (json) => (json.projects.shop.architect['extract-i18n'] = { builder: '@typegpu-poc/angular:extract-i18n' }));
+    expect(target(await ngAdd(tree, { project: 'admin' }), 'admin', 'build').builder).toBe('@angular-builders/custom-esbuild:application');
+  });
+});
+
+describe('ng add: every refusal says the package itself is already installed (E5)', () => {
+  const NOTE = /@typegpu-poc\/angular itself is already installed.*angular\.json.*not modified.*npm uninstall @typegpu-poc\/angular/s;
+
+  it.each([['plugin', {}], ['prebuild', { shaders: 'prebuild' }]])('%s mode: unknown project, not an application, several applications, no application, no package.json', async (_mode, mode) => {
+    const several = await workspaceWith(['shop', 'admin']);
+    await expect(ours().runSchematic('ng-add', { ...mode, project: 'nope' }, several)).rejects.toThrow(NOTE);
+    await expect(ours().runSchematic('ng-add', { ...mode }, several)).rejects.toThrow(/several applications.*--project <name>.*already installed/s);
+    editJson(several, 'angular.json', (json) => (json.projects.admin.projectType = 'library'));
+    await expect(ours().runSchematic('ng-add', { ...mode, project: 'admin' }, several)).rejects.toThrow(NOTE);
+    editJson(several, 'angular.json', (json) => (json.projects.shop.projectType = 'library'));
+    await expect(ours().runSchematic('ng-add', { ...mode }, several)).rejects.toThrow(NOTE);
+    const noPackage = await workspaceWith();
+    noPackage.delete('package.json');
+    await expect(ours().runSchematic('ng-add', { ...mode }, noPackage)).rejects.toThrow(/package\.json was not found.*already installed.*npm uninstall/s);
+  });
+});
+
+describe('ng add: dependencies outside the tested set are kept but reported (E2)', () => {
+  const warnings = async (mode: 'plugin' | 'prebuild', edit: (pkg: Record<string, any>) => void) => {
+    const tree = await workspaceWith();
+    editJson(tree, 'package.json', edit);
+    const entries = (pkg: Record<string, any>) => ({ ...pkg.dependencies, ...pkg.devDependencies });
+    const before = entries(readJson(tree, 'package.json'));
+    const { tree: after, warn } = await run(tree, { shaders: mode });
+    expect(entries(readJson(after, 'package.json'))).toMatchObject(before); // an existing entry is never changed
+    return warn;
+  };
+
+  it.each(['plugin', 'prebuild'] as const)('%s: TypeScript below 5.5, esbuild below 0.24, unplugin-typegpu outside ^0.12.6, and 0.12.7 next to a pinned typegpu below 0.12.9', async (mode) => {
+    expect(await warnings(mode, (pkg) => (pkg.devDependencies.typescript = '~5.4.0'))).toContain('typescript "~5.4.0" is older than 5.5');
+    expect(await warnings(mode, (pkg) => (pkg.devDependencies.typescript = '^4.9.5'))).toContain('typescript "^4.9.5" is older than 5.5');
+    expect(await warnings(mode, (pkg) => (pkg.devDependencies.typescript = '~5.5.0'))).not.toContain('typescript');
+    expect(await warnings(mode, (pkg) => (pkg.devDependencies.esbuild = '^0.23.1'))).toContain('esbuild "^0.23.1" is older than 0.24');
+    expect(await warnings(mode, (pkg) => (pkg.devDependencies['unplugin-typegpu'] = '0.11.6'))).toContain('unplugin-typegpu "0.11.6" is outside ^0.12.6');
+    expect(await warnings(mode, (pkg) => (pkg.devDependencies['unplugin-typegpu'] = '0.12.5'))).toContain('unplugin-typegpu "0.12.5" is outside ^0.12.6');
+    expect(await warnings(mode, (pkg) => (pkg.devDependencies['unplugin-typegpu'] = '^0.13.0'))).toContain('unplugin-typegpu "^0.13.0" is outside ^0.12.6');
+    expect(await warnings(mode, (pkg) => ((pkg.dependencies.typegpu = '0.12.8'), (pkg.devDependencies['unplugin-typegpu'] = '0.12.7')))).toContain('needs typegpu ^0.12.9');
+  });
+
+  it('plugin mode: custom-esbuild of another Angular major', async () => {
+    expect(await warnings('plugin', (pkg) => (pkg.devDependencies['@angular-builders/custom-esbuild'] = '^21.0.0'))).toContain('"^21.0.0" is for Angular 21, but the project uses Angular 22: use ^22.0.0');
+  });
+
+  it('prebuild mode does not look at custom-esbuild (it does not use it)', async () => {
+    expect(await warnings('prebuild', (pkg) => (pkg.devDependencies['@angular-builders/custom-esbuild'] = '^21.0.0'))).not.toContain('custom-esbuild');
+  });
+
+  it('supported combinations and ranges that may resolve above the tested pair get no warning', async () => {
+    const clean = (pkg: Record<string, any>) => {
+      pkg.devDependencies.typescript = '~5.9.2';
+      pkg.devDependencies.esbuild = '^0.25.0';
+      pkg.devDependencies['unplugin-typegpu'] = '0.12.7';
+      pkg.dependencies.typegpu = '^0.12.8'; // a range: npm resolves the 0.12.9+ that 0.12.7 needs
+      pkg.devDependencies['@angular-builders/custom-esbuild'] = '^22.0.0';
+    };
+    expect(await warnings('plugin', clean)).toBe('');
+    expect(await warnings('prebuild', clean)).toBe('');
+    expect(await warnings('plugin', () => undefined)).toBe('');
+    expect(await warnings('prebuild', () => undefined)).toBe('');
+  });
+});

@@ -28,7 +28,7 @@ import {
 import { applicationNames, outputDirectories, selectApplication } from '../utils/project';
 import { keepFormatting, setJson } from '../utils/text-files';
 import { type ToolPaths, findWorkspaceRoot, resolveToolPaths } from '../utils/tool-paths';
-import { angularMajor, assertTypegpuRange, lowestVersion, unpluginVersionFor } from '../utils/versions';
+import { angularMajor, assertTypegpuRange, dependencyWarnings, lowestVersion, unpluginVersionFor } from '../utils/versions';
 import { ngAddPrebuild } from './prebuild';
 import type { NgAddOptions } from './schema';
 
@@ -69,7 +69,7 @@ export function ngAdd(options: NgAddOptions): Rule {
 function ngAddPlugin(options: NgAddOptions): Rule {
   return async (tree, context) => {
     const workspace = await readWorkspace(tree);
-    const projectName = selectApplication(workspace, options.project, `ng add ${PACKAGE_NAME}`);
+    const projectName = selectApplication(workspace, options.project, `ng add ${PACKAGE_NAME}`, REFUSAL_NOTE);
     const project = workspace.projects.get(projectName)!;
     const multiple = applicationNames(workspace).length > 1;
     // Real location of the plugin and the check tool relative to the workspace (hoisted node_modules, pnpm links, ...).
@@ -77,7 +77,7 @@ function ngAddPlugin(options: NgAddOptions): Rule {
     const tools = resolveToolPaths(workspaceRoot, project.root);
 
     if (!tree.exists('package.json')) {
-      throw new SchematicsException('package.json was not found in the workspace root.');
+      throw new SchematicsException(`package.json was not found in the workspace root.\n${REFUSAL_NOTE}`);
     }
     const pkg = JSON.parse(tree.readText('package.json')) as PackageJson;
 
@@ -106,11 +106,11 @@ function ngAddPlugin(options: NgAddOptions): Rule {
     }
 
     // ---- angular.json ----
-    const testNote: string[] = [];
+    const testNote: string[] = dependencyWarnings((name) => hasDependency(pkg, name), major, typegpuVersion, true);
     const infoNote: string[] = [];
     const configureWorkspace = updateWorkspace((ws) => {
       const target = ws.projects.get(projectName)!;
-      configureBuild(target, projectName, tools, testNote, installedSchema(workspaceRoot, project.root, 'application'), major);
+      configureBuild(target, projectName, tools, testNote, infoNote, installedSchema(workspaceRoot, project.root, 'application'), major);
       configureServe(target, projectName);
       configureTest(target, projectName, tree.exists(`${projectRoot(target)}tsconfig.spec.json`), major, testNote, installedUnitTestOptions(workspaceRoot, project.root), tools, infoNote);
     });
@@ -212,6 +212,22 @@ function ensurePlugin(options: Options | undefined, createIfMissing: boolean, to
   return target;
 }
 
+/**
+ * The plugin mode and the prebuild do not mix: a target on one of this package's wrapper builders (build, dev-server, unit-test, karma, extract-i18n)
+ * builds the shaders into `shaders-dist/` and the plugin would bundle them a second time. Any of them refuses, not only the build target (a project
+ * whose build is stock but whose extract-i18n is already the wrapper must not slip through).
+ */
+function refuseMixedModes(project: ProjectDefinition, projectName: string): void {
+  const wrappers: string[] = Object.values(WRAPPERS);
+  for (const [name, target] of project.targets) {
+    if (!wrappers.includes(target.builder)) continue;
+    throw unsupported(
+      `Project "${projectName}" is already set up for the shader prebuild (its ${name === 'build' ? 'build target' : `"${name}" target`} is "${target.builder}"). The plugin mode and the prebuild do not mix.`,
+      `To keep the prebuild, there is nothing to do. To switch the project to the plugin mode, first restore the stock builders in angular.json ("${BUILDERS.stock.build}", "${BUILDERS.stock.serve}", "${BUILDERS.stock.test}" (or "@angular/build:karma") and "${BUILDERS.stock.extractI18n}"; and remove the "@shaders/*" path from tsconfig), then run ng add ${PACKAGE_NAME} again.`,
+    );
+  }
+}
+
 /** What to tell a project that is not on the esbuild application builder, by what it uses now. */
 function buildFix(builder: string): string {
   switch (builder) {
@@ -229,20 +245,17 @@ function configureBuild(
   projectName: string,
   tools: ToolPaths,
   notes: string[],
+  info: string[],
   installed: SchemaJson | undefined,
   major: number,
 ): void {
+  refuseMixedModes(target, projectName);
   const build = target.targets.get('build');
   if (!build) {
     throw unsupported(`Project "${projectName}" has no "build" target.`, 'ng add configures applications that have a build target.');
   }
   if (build.builder === BUILDERS.stock.build || build.builder === DEVKIT_ALIASES.build) {
     build.builder = BUILDERS.custom.build;
-  } else if (build.builder === WRAPPERS.build) {
-    throw unsupported(
-      `Project "${projectName}" is already set up for the shader prebuild (its build target is "${WRAPPERS.build}"). The plugin mode and the prebuild do not mix.`,
-      `To keep the prebuild, there is nothing to do. To switch the project to the plugin mode, first restore the stock builders in angular.json ("${BUILDERS.stock.build}", "${BUILDERS.stock.serve}", "${BUILDERS.stock.test}" or "@angular/build:karma"; and remove the "@shaders/*" path from tsconfig), then run ng add ${PACKAGE_NAME} again.`,
-    );
   } else if (build.builder !== BUILDERS.custom.build) {
     throw unsupported(
       `Project "${projectName}" builds with "${build.builder}". The TypeGPU shader pipeline needs the esbuild application builder.`,
@@ -253,7 +266,41 @@ function configureBuild(
   for (const name of Object.keys(build.configurations ?? {})) {
     build.configurations![name] = ensurePlugin(build.configurations![name], false, tools, notes);
   }
+  ensureConditions(build, projectName, notes, info);
   if (!allowedHostsSupported(installed, major)) dropAllowedHosts(build, projectName, notes);
+}
+
+/**
+ * Angular's own `application` builder bundles with the conditions `module` and `production` (an optimized build) or `development`, unless the
+ * `conditions` option is set. For a third-party builder the CLI fills that option with `[]` (a "custom" list that is empty), so a package whose
+ * `exports` use `production`/`development` resolves to its `default` file in every build (found by QA, verified with a fixture package on
+ * Angular 22.2.4: dev and prod builds both took `default`). Writing the stock conditions into the configurations restores what the stock
+ * builder does. The server bundle of an SSR project reads the same option.
+ * A project that sets `conditions` anywhere (build options or a configuration) is left alone: it chose its own. Idempotent.
+ */
+function ensureConditions(build: TargetDefinition, projectName: string, notes: string[], info: string[]): void {
+  const configurations = build.configurations ?? {};
+  if (build.options?.['conditions'] !== undefined || Object.values(configurations).some((configuration) => configuration?.['conditions'] !== undefined)) return;
+  const written: string[] = [];
+  for (const name of ['production', 'development']) {
+    const configuration = configurations[name];
+    if (!configuration) continue;
+    // the stock builder picks `production` for an optimized build (`optimization` unset or on) and `development` otherwise, whatever the configuration is called
+    const optimization = (configuration['optimization'] ?? build.options?.['optimization']) as Json;
+    const optimized =
+      typeof optimization === 'boolean'
+        ? optimization
+        : optimization && typeof optimization === 'object' && !Array.isArray(optimization) && typeof optimization['scripts'] === 'boolean'
+          ? optimization['scripts']
+          : name === 'production';
+    configuration['conditions'] = ['module', optimized ? 'production' : 'development'];
+    written.push(`"${name}": ${JSON.stringify(configuration['conditions'])}`);
+  }
+  if (written.length > 0) {
+    info.push(
+      `Set "conditions" in the build configurations of "${projectName}" (${written.join(', ')}): ${CUSTOM_ESBUILD} replaces Angular's default resolve conditions with an empty list, so a package whose "exports" use "production"/"development" would resolve to its "default" file in every ng build. These are the conditions the stock builder uses.`,
+    );
+  }
 }
 
 type SchemaJson = { properties?: Record<string, { properties?: Record<string, unknown> } | undefined> };

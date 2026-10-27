@@ -11,16 +11,17 @@ export function applicationNames(workspace: WorkspaceDefinition): string[] {
 }
 
 /** The project to act on: the explicit one, or the only application. Never a guess between several. */
-export function selectApplication(workspace: WorkspaceDefinition, requested: string | undefined, command: string): string {
+export function selectApplication(workspace: WorkspaceDefinition, requested: string | undefined, command: string, note = ''): string {
+  const tail = note ? `\n${note}` : ''; // `ng add` passes its refusal note: the package is already installed when it refuses
   const applications = applicationNames(workspace);
   if (requested) {
     if (!workspace.projects.has(requested)) {
       throw new SchematicsException(
-        `Project "${requested}" does not exist in angular.json. Applications: ${applications.join(', ') || '(none)'}.`,
+        `Project "${requested}" does not exist in angular.json. Applications: ${applications.join(', ') || '(none)'}.${tail}`,
       );
     }
     if (!applications.includes(requested)) {
-      throw new SchematicsException(`Project "${requested}" is not an application. Applications: ${applications.join(', ') || '(none)'}.`);
+      throw new SchematicsException(`Project "${requested}" is not an application. Applications: ${applications.join(', ') || '(none)'}.${tail}`);
     }
     return requested;
   }
@@ -28,11 +29,11 @@ export function selectApplication(workspace: WorkspaceDefinition, requested: str
   if (applications.length === 0) {
     const others = [...workspace.projects.keys()];
     throw new SchematicsException(
-      `This workspace has no application project to configure${others.length > 0 ? ` (its projects are not applications: ${others.join(', ')}; "projectType" must be "application")` : ''}.`,
+      `This workspace has no application project to configure${others.length > 0 ? ` (its projects are not applications: ${others.join(', ')}; "projectType" must be "application")` : ''}.${tail}`,
     );
   }
   throw new SchematicsException(
-    `This workspace has several applications (${applications.join(', ')}). Say which one: ${command} --project <name>.`,
+    `This workspace has several applications (${applications.join(', ')}). Say which one: ${command} --project <name>.${tail}`,
   );
 }
 

@@ -24,7 +24,7 @@ import {
   WRAPPERS,
 } from '../utils/constants';
 import { applicationNames, selectApplication } from '../utils/project';
-import { angularMajor, assertTypegpuRange, lowestVersion, unpluginVersionFor } from '../utils/versions';
+import { angularMajor, assertTypegpuRange, dependencyWarnings, lowestVersion, unpluginVersionFor } from '../utils/versions';
 import type { NgAddOptions } from './schema';
 
 /**
@@ -196,7 +196,7 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
   return async (tree) => {
     const workspace = await readWorkspace(tree);
     const command = `ng add ${PACKAGE_NAME} --shaders prebuild`;
-    const projectName = selectApplication(workspace, options.project, command);
+    const projectName = selectApplication(workspace, options.project, command, REFUSAL_NOTE);
     const project = workspace.projects.get(projectName)!;
 
     // ---- refuse what this mode was not built or tested for (before anything is written) ----
@@ -233,7 +233,7 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
     const { build: buildTsConfig, others } = tsconfigsOf(project);
     if (!buildTsConfig) throw refuse(`The build target of "${projectName}" has no "tsConfig" option.`, 'Set it and run the schematic again.');
 
-    if (!tree.exists('package.json')) throw new SchematicsException('package.json was not found in the workspace root.');
+    if (!tree.exists('package.json')) throw new SchematicsException(`package.json was not found in the workspace root.\n${REFUSAL_NOTE}`);
     const packageText = tree.readText('package.json');
     const pkg = JSON.parse(packageText) as PackageJson;
     const major = angularMajor(hasDependency(pkg, '@angular/core'));
@@ -257,7 +257,7 @@ export function ngAddPrebuild(options: NgAddOptions): Rule {
       });
     const tsconfigEdits = planTsconfig(tree, projectName, out, buildTsConfig, others, otherApplications);
 
-    const notes: string[] = [];
+    const notes: string[] = dependencyWarnings((name) => hasDependency(pkg, name), major, typegpuVersion, false);
     if (extractI18n && !wrapExtractI18n) {
       notes.push(
         `The "extract-i18n" target of "${projectName}" uses "${extractI18n.builder}", which is left unchanged: ` +
