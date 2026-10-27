@@ -4,6 +4,7 @@ import {
   type Tree,
   apply,
   applyTemplates,
+  chain,
   filter,
   mergeWith,
   move,
@@ -67,13 +68,20 @@ export function component(options: ComponentOptions): Rule {
       shaderImport = `@shaders/${inside}`;
     }
 
-    return mergeWith(
-      apply(url('./files'), [
-        options.skipTests ? filter((path) => !path.endsWith('.spec.ts.template')) : noop(),
-        applyTemplates({ ...strings, name, classifiedName, selector, shaderImport, packageName: PACKAGE_NAME }),
-        move(parsed.path),
-      ]),
-    );
+    return chain([
+      mergeWith(
+        apply(url('./files'), [
+          options.skipTests ? filter((path) => !path.endsWith('.spec.ts.template')) : noop(),
+          applyTemplates({ ...strings, name, classifiedName, selector, shaderImport, packageName: PACKAGE_NAME }),
+          move(parsed.path),
+        ]),
+      ),
+      (_tree, context) => {
+        context.logger.info(
+          `Next: add ${classifiedName} to the "imports" of the component (or route) that should show it, and use <${selector}></${selector}> in that template.`,
+        );
+      },
+    ]);
   };
 }
 

@@ -148,6 +148,38 @@ describe('ng add in an npm-workspaces layout (app in packages/web, dependencies 
     expect(options.runner).toBeUndefined();
   });
 
+  describe('security.allowedHosts is judged by the installed custom-esbuild application schema, not by the Angular major alone', () => {
+    const install = (properties: object) => {
+      const schemaDir = join(repo, 'node_modules', '@angular-builders', 'custom-esbuild', 'dist', 'application');
+      mkdirSync(schemaDir, { recursive: true });
+      writeFileSync(join(schemaDir, 'schema.json'), JSON.stringify({ properties: { security: { properties } } }));
+    };
+    const withSecurity = async (angularVersion: string, range: string) => {
+      const tree = await workspaceWith(['app'], angularVersion);
+      editJson(tree, 'package.json', (pkg) => (pkg.dependencies['@angular/core'] = range));
+      editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.options.security = { allowedHosts: [] }));
+      writeFileSync(join(web, 'angular.json'), tree.readText('angular.json'));
+      process.chdir(web);
+      return tree;
+    };
+    const security = (tree: Awaited<ReturnType<typeof workspaceWith>>) => readJson(tree, 'angular.json').projects.app.architect.build.options.security;
+
+    it('an installed schema without allowedHosts: removed, on Angular 22 too', async () => {
+      install({ autoCsp: {} });
+      expect(security(await ngAdd(await withSecurity('22.0.0', '^22.0.0')))).toBeUndefined();
+    });
+
+    it('an installed schema that has allowedHosts: kept, even on Angular 20', async () => {
+      install({ autoCsp: {}, allowedHosts: {} });
+      expect(security(await ngAdd(await withSecurity('20.3.0', '^20.3.0')))).toEqual({ allowedHosts: [] });
+    });
+
+    it('nothing installed yet: the Angular major decides (20 removes, 22 keeps)', async () => {
+      expect(security(await ngAdd(await withSecurity('20.3.0', '^20.3.0')))).toBeUndefined();
+      expect(security(await ngAdd(await withSecurity('22.0.0', '^22.0.0')))).toEqual({ allowedHosts: [] });
+    });
+  });
+
   it('falls back to conventional paths when the working directory is not the edited workspace (virtual tree)', async () => {
     process.chdir(repo); // a directory without that angular.json
     expect(plugins(await ngAdd(await workspaceWith()))).toEqual([`node_modules/@typegpu-poc/angular/${PLUGIN_FILE}`]);

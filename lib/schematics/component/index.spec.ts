@@ -157,6 +157,42 @@ describe('component: safety', () => {
   });
 });
 
+describe('component: what it tells you after the files', () => {
+  const run = async (tree: Awaited<ReturnType<typeof workspaceWith>>, options: Record<string, unknown>) => {
+    const runner = ours();
+    const info: string[] = [];
+    runner.logger.subscribe((entry) => info.push(entry.message));
+    await runner.runSchematic('component', options, tree);
+    return info.join('\n');
+  };
+
+  it('says to import the component and use its selector in a template', async () => {
+    expect(await run(await configured(), { name: 'my-canvas' })).toMatch(
+      /Next: add MyCanvas to the "imports" of the component \(or route\) that should show it, and use <app-my-canvas><\/app-my-canvas> in that template\./,
+    );
+  });
+
+  it('uses the project prefix in the selector, in both modes', async () => {
+    const tree = await workspaceWith(['shop'], '22.0.0', false);
+    editJson(tree, 'angular.json', (json) => (json.projects.shop.prefix = 'sh'));
+    const prebuilt = await ours().runSchematic('ng-add', { shaders: 'prebuild', project: 'shop' }, tree);
+    expect(await run(prebuilt, { name: 'orb', project: 'shop' })).toContain('<sh-orb></sh-orb>');
+  });
+
+  it('names no hint when the schematic fails', async () => {
+    await expect(run(await workspaceWith(), { name: 'my-canvas' })).rejects.toThrow(/not set up for TypeGPU shaders/);
+  });
+
+  it('refuses a library project, and a workspace that has only libraries', async () => {
+    const tree = await workspaceWith(['shop', 'kit']);
+    editJson(tree, 'angular.json', (json) => (json.projects.kit.projectType = 'library'));
+    await expect(generate(tree, { name: 'orb', project: 'kit' })).rejects.toThrow(/Project "kit" is not an application/);
+    const libraries = await workspaceWith(['kit']);
+    editJson(libraries, 'angular.json', (json) => (json.projects.kit.projectType = 'library'));
+    await expect(generate(libraries, { name: 'orb' })).rejects.toThrow(/no application project.*not applications: kit/s);
+  });
+});
+
 describe('component: any path that points at the plugin counts as configured', () => {
   const PLUGIN = 'node_modules/@typegpu-poc/angular/tools/typegpu-shaders.esbuild.mjs';
 

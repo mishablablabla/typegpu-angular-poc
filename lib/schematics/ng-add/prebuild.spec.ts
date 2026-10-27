@@ -188,15 +188,16 @@ describe('ng add --shaders prebuild: an existing project', () => {
     expect(snapshot(tree)).toEqual(before);
   });
 
-  it('plugin mode on Angular 20 with a `security` block (an `ng new --ssr` app) warns that custom-esbuild 20 rejects it', async () => {
+  it('plugin mode on Angular 20 with the `security` block of an `ng new --ssr` app removes its empty allowedHosts (custom-esbuild 20 rejects it) and says so', async () => {
     const tree = await workspaceWith(['app'], '20.3.0');
     editJson(tree, 'package.json', (json) => (json.dependencies['@angular/core'] = '^20.3.0'));
     editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.options.security = { allowedHosts: [] }));
     const runner = ours();
     const warnings: string[] = [];
     runner.logger.subscribe((entry) => entry.level === 'warn' && warnings.push(entry.message));
-    await runner.runSchematic('ng-add', {}, tree);
-    expect(warnings.join('\n')).toContain('rejects the `security` option');
+    const after = await runner.runSchematic('ng-add', {}, tree);
+    expect(warnings.join('\n')).toContain('Removed security.allowedHosts');
+    expect(target(after, 'app', 'build').options.security).toBeUndefined();
   });
 
   it('plugin mode on Angular 22 with a `security` block does not warn (custom-esbuild 22 knows it)', async () => {
@@ -206,7 +207,7 @@ describe('ng add --shaders prebuild: an existing project', () => {
     const warnings: string[] = [];
     runner.logger.subscribe((entry) => entry.level === 'warn' && warnings.push(entry.message));
     await runner.runSchematic('ng-add', {}, tree);
-    expect(warnings.join('\n')).not.toContain('rejects the `security` option');
+    expect(warnings.join('\n')).not.toContain('Removed security.allowedHosts');
   });
 
   it('the plugin mode is still the default and still changes angular.json the old way', async () => {

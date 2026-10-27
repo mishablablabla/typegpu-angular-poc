@@ -26,7 +26,10 @@ export function selectApplication(workspace: WorkspaceDefinition, requested: str
   }
   if (applications.length === 1) return applications[0]!;
   if (applications.length === 0) {
-    throw new SchematicsException('This workspace has no application project to configure.');
+    const others = [...workspace.projects.keys()];
+    throw new SchematicsException(
+      `This workspace has no application project to configure${others.length > 0 ? ` (its projects are not applications: ${others.join(', ')}; "projectType" must be "application")` : ''}.`,
+    );
   }
   throw new SchematicsException(
     `This workspace has several applications (${applications.join(', ')}). Say which one: ${command} --project <name>.`,
@@ -34,8 +37,10 @@ export function selectApplication(workspace: WorkspaceDefinition, requested: str
 }
 
 /** Where `ng build` writes the browser bundle (`dist/<project>/browser` unless `outputPath` says otherwise), and the SSR server bundle when there is one. */
-export function outputDirectories(project: ProjectDefinition, projectName: string): string[] {
-  const buildOptions = project.targets.get('build')?.options;
+export function outputDirectories(project: ProjectDefinition, projectName: string, configuration?: string): string[] {
+  const build = project.targets.get('build');
+  // `ng build --configuration <name>` merges the configuration over the target options: its `outputPath`/`server` win.
+  const buildOptions = { ...build?.options, ...(configuration ? build?.configurations?.[configuration] : undefined) };
   const outputPath = buildOptions?.['outputPath'] as unknown;
   let base = `dist/${projectName}`;
   let browser = 'browser';

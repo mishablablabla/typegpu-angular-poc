@@ -20,10 +20,13 @@ import {
   DEVKIT_ALIASES,
   PACKAGE_NAME,
   REFUSAL_NOTE,
+  SHADERS_BIN,
+  SHADERS_OUT,
   TYPEGPU_DEFAULT,
   WRAPPERS,
 } from '../utils/constants';
 import { applicationNames, outputDirectories, selectApplication } from '../utils/project';
+import { keepFormatting, setJson } from '../utils/text-files';
 import { type ToolPaths, findWorkspaceRoot, resolveToolPaths } from '../utils/tool-paths';
 import { angularMajor, assertTypegpuRange, lowestVersion, unpluginVersionFor } from '../utils/versions';
 import { ngAddPrebuild } from './prebuild';
@@ -48,7 +51,22 @@ const unsupported = (what: string, fix: string) => new SchematicsException(`${wh
  * Idempotent; refuses (modifying no project file) build setups it cannot extend safely.
  */
 export function ngAdd(options: NgAddOptions): Rule {
-  if (options.shaders === 'prebuild') return ngAddPrebuild(options);
+  if (options.shaders === 'prebuild') {
+    return keepFormatting(
+      chain([
+        ngAddPrebuild(options),
+        (_host, ctx) => {
+          ctx.logger.info(
+            `"${SHADERS_OUT}/" is generated and not committed: after a fresh clone (or before the first ng build / ng serve / ng test) editors and tsc report TS2307 for "@shaders/..." imports until the shaders are built once (npx ${SHADERS_BIN} build, or any ng build).`,
+          );
+        },
+      ]),
+    );
+  }
+  return keepFormatting(ngAddPlugin(options));
+}
+
+function ngAddPlugin(options: NgAddOptions): Rule {
   return async (tree, context) => {
     const workspace = await readWorkspace(tree);
     const projectName = selectApplication(workspace, options.project, `ng add ${PACKAGE_NAME}`);
@@ -89,19 +107,16 @@ export function ngAdd(options: NgAddOptions): Rule {
 
     // ---- angular.json ----
     const testNote: string[] = [];
+    const infoNote: string[] = [];
     const configureWorkspace = updateWorkspace((ws) => {
       const target = ws.projects.get(projectName)!;
-      configureBuild(target, projectName, tools, testNote);
-      if (major === 20 && target.targets.get('build')?.options?.['security'] !== undefined) {
-        testNote.push(
-          'Angular 20: @angular-builders/custom-esbuild 20.0.0 carries an older application schema and rejects the `security` option (`allowedHosts`) that `ng new --ssr` generates: `ng build` fails with "Schema validation failed ... /security must NOT have additional properties". Remove the `security` block from the build options (or use the prebuild mode).',
-        );
-      }
+      configureBuild(target, projectName, tools, testNote, installedSchema(workspaceRoot, project.root, 'application'), major);
       configureServe(target, projectName);
-      configureTest(target, projectName, tree.exists(`${projectRoot(target)}tsconfig.spec.json`), major, testNote, installedUnitTestOptions(workspaceRoot, project.root), tools);
+      configureTest(target, projectName, tree.exists(`${projectRoot(target)}tsconfig.spec.json`), major, testNote, installedUnitTestOptions(workspaceRoot, project.root), tools, infoNote);
     });
 
     // ---- CI check script ----
+    let checkScript: string | undefined; // the name of our script in package.json after this run (for the final message)
     const addCheckScript: Rule = (host, ctx) => {
       const name = multiple ? `${CHECK_SCRIPT}:${projectName}` : CHECK_SCRIPT;
       // Re-read: addDependency rules have rewritten package.json since `pkg` was parsed.
@@ -112,31 +127,28 @@ export function ngAdd(options: NgAddOptions): Rule {
         const existing = manifest.scripts[name]!;
         const repaired = tools.repairCheckScript(existing);
         if (repaired !== existing) {
-          manifest.scripts[name] = repaired;
-          const indent = /\n([ \t]+)"/.exec(text)?.[1] ?? '  ';
-          host.overwrite('package.json', JSON.stringify(manifest, null, indent) + (text.endsWith('\n') ? '\n' : ''));
+          host.overwrite('package.json', setJson(text, ['scripts', name], repaired));
           ctx.logger.info(`Fixed the path of the check tool in the "${name}" script (file not found): ${tools.check}`);
         }
+        if (repaired.includes('check-shader-bundle')) checkScript = name;
         return;
       }
       const build = project.targets.get('build');
       const production = build?.configurations?.['production'] !== undefined;
       // The script is run by npm through the shell of the user's platform: only values that are plain words are put in it unquoted (a space
       // would split it, `;` `&` `$(...)` in a value of a hostile angular.json would be run). Anything else: the user writes the script.
-      const words = [projectName, tools.check, ...outputDirectories(project, projectName)];
+      const directories = outputDirectories(project, projectName, production ? 'production' : undefined);
+      const words = [projectName, tools.check, ...directories];
       const unsafe = words.filter((word) => !/^[\w@.\/-]+$/.test(word));
       if (unsafe.length > 0) {
         ctx.logger.warn(`The "${name}" script was not added: ${unsafe.map((word) => JSON.stringify(word)).join(', ')} cannot be put in an npm script without quoting. Add it yourself: build the project, then run node ${JSON.stringify(tools.check)} on its output folders.`);
         return;
       }
-      manifest.scripts = {
-        ...manifest.scripts,
-        [name]:
-          `ng build${multiple ? ` ${projectName}` : ''}${production ? ' --configuration production' : ''}` +
-          ` && node ${tools.check} ${outputDirectories(project, projectName).join(' ')}`,
-      };
-      const indent = /\n([ \t]+)"/.exec(text)?.[1] ?? '  ';
-      host.overwrite('package.json', JSON.stringify(manifest, null, indent) + (text.endsWith('\n') ? '\n' : ''));
+      const script =
+        `ng build${multiple ? ` ${projectName}` : ''}${production ? ' --configuration production' : ''}` +
+        ` && node ${tools.check} ${directories.join(' ')}`;
+      host.overwrite('package.json', setJson(text, ['scripts', name], script));
+      checkScript = name;
       ctx.logger.info(`Added the "${name}" script (production build + shader bundle check, for CI).`);
     };
 
@@ -146,9 +158,13 @@ export function ngAdd(options: NgAddOptions): Rule {
       addCheckScript,
       (_host, ctx) => {
         testNote.forEach((line) => ctx.logger.warn(line));
+        infoNote.push(...budgetNote(project));
+        infoNote.forEach((line) => ctx.logger.info(line));
         ctx.logger.info(
           `TypeGPU is set up for "${projectName}". Next: ng generate ${PACKAGE_NAME}:component <name>` +
-            ` (until the build contains a shader, "npm run ${CHECK_SCRIPT}" fails by design: nothing to check; pass --allow-empty to the check tool to accept that).`,
+            (checkScript
+              ? ` (until the build contains a shader, "npm run ${checkScript}" fails by design: nothing to check; pass --allow-empty to the check tool to accept that).`
+              : '.'),
         );
       },
     ]);
@@ -208,7 +224,14 @@ function buildFix(builder: string): string {
   }
 }
 
-function configureBuild(target: ProjectDefinition, projectName: string, tools: ToolPaths, notes: string[]): void {
+function configureBuild(
+  target: ProjectDefinition,
+  projectName: string,
+  tools: ToolPaths,
+  notes: string[],
+  installed: SchemaJson | undefined,
+  major: number,
+): void {
   const build = target.targets.get('build');
   if (!build) {
     throw unsupported(`Project "${projectName}" has no "build" target.`, 'ng add configures applications that have a build target.');
@@ -218,7 +241,7 @@ function configureBuild(target: ProjectDefinition, projectName: string, tools: T
   } else if (build.builder === WRAPPERS.build) {
     throw unsupported(
       `Project "${projectName}" is already set up for the shader prebuild (its build target is "${WRAPPERS.build}"). The plugin mode and the prebuild do not mix.`,
-      'To change the setup of that project, run `ng add ... --shaders prebuild` again, or switch its builders back to the stock ones first.',
+      `To keep the prebuild, there is nothing to do. To switch the project to the plugin mode, first restore the stock builders in angular.json ("${BUILDERS.stock.build}", "${BUILDERS.stock.serve}", "${BUILDERS.stock.test}" or "@angular/build:karma"; and remove the "@shaders/*" path from tsconfig), then run ng add ${PACKAGE_NAME} again.`,
     );
   } else if (build.builder !== BUILDERS.custom.build) {
     throw unsupported(
@@ -230,6 +253,66 @@ function configureBuild(target: ProjectDefinition, projectName: string, tools: T
   for (const name of Object.keys(build.configurations ?? {})) {
     build.configurations![name] = ensurePlugin(build.configurations![name], false, tools, notes);
   }
+  if (!allowedHostsSupported(installed, major)) dropAllowedHosts(build, projectName, notes);
+}
+
+type SchemaJson = { properties?: Record<string, { properties?: Record<string, unknown> } | undefined> };
+
+/**
+ * Whether the custom-esbuild `application` schema knows `security.allowedHosts`, which Angular 20.3's `ng new --ssr` writes.
+ * Read from the installed package when there is one; otherwise from the Angular major: custom-esbuild 20 (20.0.0 is the only
+ * release for Angular 20) ships the schema of Angular 20.0, where `security` has `autoCsp` only; 21 and later know `allowedHosts`.
+ */
+function allowedHostsSupported(installed: SchemaJson | undefined, major: number): boolean {
+  if (installed) return installed.properties?.['security']?.properties?.['allowedHosts'] !== undefined;
+  return major >= 21;
+}
+
+/**
+ * The custom builder validates the build options against a schema without `security.allowedHosts`, and `ng build`,
+ * `ng serve` and `ng extract-i18n` fail on it ("Schema validation failed ... /security must NOT have additional properties").
+ * An EMPTY list is the default (nothing but localhost allowed), so it is removed, and said so. A list with hosts in it is a
+ * security setting that must not be dropped silently, and keeping it means a build that cannot run: that is refused.
+ */
+function dropAllowedHosts(build: TargetDefinition, projectName: string, notes: string[]): void {
+  const places: [string, Options][] = [['the build options', build.options ?? {}]];
+  for (const [name, configuration] of Object.entries(build.configurations ?? {})) {
+    if (configuration) places.push([`the "${name}" configuration`, configuration]);
+  }
+  const removedFrom: string[] = [];
+  for (const [label, options] of places) {
+    const security = options['security'];
+    if (!security || typeof security !== 'object' || Array.isArray(security) || !('allowedHosts' in security)) continue;
+    const hosts = (security as Record<string, Json>)['allowedHosts'];
+    if (!Array.isArray(hosts) || hosts.length > 0) {
+      throw unsupported(
+        `${label[0]!.toUpperCase()}${label.slice(1)} of "${projectName}" set security.allowedHosts (${JSON.stringify(hosts)}). @angular-builders/custom-esbuild 20.x (the only release for Angular 20) validates the build options against an older schema that does not know it: ng build, ng serve and ng extract-i18n would fail with "Schema validation failed ... /security must NOT have additional properties", and removing the list would drop your host allow-list.`,
+        `Use the prebuild mode instead (ng add ${PACKAGE_NAME} --shaders prebuild: it keeps the stock builders), or move the hosts to the NG_ALLOWED_HOSTS environment variable of the SSR server (comma-separated; it takes precedence over angular.json) and remove security.allowedHosts from angular.json, then run the schematic again.`,
+      );
+    }
+    delete (security as Record<string, Json>)['allowedHosts'];
+    if (Object.keys(security).length === 0) delete options['security'];
+    removedFrom.push(label);
+  }
+  if (removedFrom.length > 0) {
+    notes.push(
+      `Removed security.allowedHosts (an empty list, which is also the default) from ${removedFrom.join(' and ')} of "${projectName}": @angular-builders/custom-esbuild 20.x validates the build options against an older schema that does not know it, and \`ng build\` would fail with "Schema validation failed ... /security must NOT have additional properties". ` +
+        'To let an SSR server answer on a real host name, set the NG_ALLOWED_HOSTS environment variable (comma-separated) or pass allowedHosts to AngularNodeAppEngine in server.ts.',
+    );
+  }
+}
+
+/** Fresh SSR apps are over the default initial budget (a warning) once a TypeGPU component is in them. ng add never edits budgets. */
+function budgetNote(project: ProjectDefinition): string[] {
+  const build = project.targets.get('build');
+  const ssr = typeof build?.options?.['server'] === 'string' || build?.options?.['ssr'] !== undefined;
+  const budgets = build?.configurations?.['production']?.['budgets'];
+  if (!ssr || !Array.isArray(budgets)) return [];
+  const initial = budgets.find((budget) => (budget as { type?: string } | null)?.type === 'initial') as { maximumWarning?: string } | undefined;
+  if (!initial || !/^500 ?kb$/i.test(String(initial.maximumWarning))) return [];
+  return [
+    'A production build of a fresh SSR application with a TypeGPU component measured about 524 kB of initial bundle, over the default budget of 500 kB that `ng new` writes (a warning; the error limit is 1 MB). ng add does not change your budgets: raise "maximumWarning" of the "initial" budget in angular.json if the warning is unwelcome.',
+  ];
 }
 
 function configureServe(target: ProjectDefinition, projectName: string): void {
@@ -258,22 +341,26 @@ function allowedUnitTestOptions(major: number, installed: readonly string[] | un
   return new Set(CUSTOM_UNIT_TEST_OPTIONS[known]);
 }
 
-/** The `properties` of an installed custom-esbuild unit-test schema, or undefined when it is not installed (yet). */
-function installedUnitTestOptions(workspaceRoot: string | undefined, projectRoot: string): readonly string[] | undefined {
+/** The parsed schema of an installed custom-esbuild builder (`application`, `unit-test`), or undefined when it is not installed (yet) or unreadable. */
+function installedSchema(workspaceRoot: string | undefined, projectRoot: string, builder: 'application' | 'unit-test'): SchemaJson | undefined {
   if (workspaceRoot === undefined) return undefined;
   for (let dir = resolve(workspaceRoot, projectRoot); ; dir = dirname(dir)) {
-    const schema = join(dir, 'node_modules', CUSTOM_ESBUILD, 'dist', 'unit-test', 'schema.json');
+    const schema = join(dir, 'node_modules', CUSTOM_ESBUILD, 'dist', builder, 'schema.json');
     if (existsSync(schema)) {
       try {
-        const properties = (JSON.parse(readFileSync(schema, 'utf8')) as { properties?: object }).properties;
-        if (properties) return Object.keys(properties);
+        return JSON.parse(readFileSync(schema, 'utf8')) as SchemaJson;
       } catch {
-        // unreadable: fall back to the table
+        return undefined; // unreadable: fall back to the table
       }
-      return undefined;
     }
     if (dirname(dir) === dir) return undefined;
   }
+}
+
+/** The option names of an installed custom-esbuild unit-test schema, or undefined when it is not installed (yet). */
+function installedUnitTestOptions(workspaceRoot: string | undefined, projectRoot: string): readonly string[] | undefined {
+  const properties = installedSchema(workspaceRoot, projectRoot, 'unit-test')?.properties;
+  return properties ? Object.keys(properties) : undefined;
 }
 
 /** Removes the options the custom builder's schema does not know; returns the names removed. */
@@ -296,6 +383,7 @@ function configureTest(
   notes: string[],
   installedOptions: readonly string[] | undefined,
   tools: ToolPaths,
+  info: string[],
 ): void {
   const hasUnitTestBuilder = major >= 21;
   const test = target.targets.get('test');
@@ -321,6 +409,9 @@ function configureTest(
     );
     return;
   }
+  info.push(
+    `\`ng test\` prints "The 'buildTarget' is configured to use '${BUILDERS.custom.build}', which is not supported" on every run: the stock unit-test builder warns about any build target that is not its own. It is harmless here: the shader plugin is applied and Vitest runs the shader modules.`,
+  );
   if (isStock) {
     test.builder = BUILDERS.custom.test;
     // The custom schema has `additionalProperties: false`: an option only the stock builder knows (`runner`,

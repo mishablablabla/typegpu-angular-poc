@@ -385,3 +385,241 @@ describe('ng add: stock-only options on the test target', () => {
     expect(readJson(await ngAdd(on22), 'angular.json').projects.app.architect.test.options).toMatchObject({ isolate: true, quiet: true });
   });
 });
+
+/** Runs ng add and returns the tree with what was logged (warnings and infos apart). */
+async function run(tree: Awaited<ReturnType<typeof workspaceWith>>, options: Record<string, unknown> = {}) {
+  const runner = ours();
+  const info: string[] = [];
+  const warn: string[] = [];
+  runner.logger.subscribe((entry) => (entry.level === 'warn' ? warn : info).push(entry.message));
+  const after = await runner.runSchematic('ng-add', options, tree);
+  return { tree: after, info: info.join('\n'), warn: warn.join('\n') };
+}
+
+const angular20 = async () => {
+  const tree = await workspaceWith(['app'], '20.3.0');
+  editJson(tree, 'package.json', (pkg) => (pkg.dependencies['@angular/core'] = '^20.3.0'));
+  return tree;
+};
+
+describe('ng add: the `security` block that `ng new --ssr` of Angular 20.3 writes (custom-esbuild 20 rejects security.allowedHosts)', () => {
+  const ssr = (json: Record<string, any>, security: unknown = { allowedHosts: [] }) => {
+    const options = json.projects.app.architect.build.options;
+    Object.assign(options, { server: 'src/main.server.ts', outputMode: 'server', security, ssr: { entry: 'src/server.ts' } });
+  };
+
+  it('removes the empty allowedHosts (the default), keeps every other option, and says what and why, with the production host advice', async () => {
+    const tree = await angular20();
+    editJson(tree, 'angular.json', (json) => ssr(json));
+    const before = readJson(tree, 'angular.json').projects.app.architect.build.options;
+    const { tree: after, warn } = await run(tree);
+    const options = readJson(after, 'angular.json').projects.app.architect.build.options;
+    expect(options.security).toBeUndefined();
+    const { security, plugins, ...rest } = { ...options };
+    const { security: _security, ...beforeRest } = before;
+    expect(rest).toEqual(beforeRest); // nothing else was touched
+    expect(plugins).toEqual([PLUGIN]);
+    expect(warn).toMatch(/Removed security\.allowedHosts \(an empty list, which is also the default\) from the build options of "app".*Schema validation failed.*NG_ALLOWED_HOSTS.*AngularNodeAppEngine/s);
+  });
+
+  it('keeps the other security options (autoCsp) and removes the key only when it is empty', async () => {
+    const tree = await angular20();
+    editJson(tree, 'angular.json', (json) => ssr(json, { allowedHosts: [], autoCsp: true }));
+    const options = readJson((await run(tree)).tree, 'angular.json').projects.app.architect.build.options;
+    expect(options.security).toEqual({ autoCsp: true });
+  });
+
+  it('cleans build configurations too', async () => {
+    const tree = await angular20();
+    editJson(tree, 'angular.json', (json) => {
+      ssr(json, undefined);
+      delete json.projects.app.architect.build.options.security;
+      json.projects.app.architect.build.configurations.production.security = { allowedHosts: [] };
+    });
+    const { tree: after, warn } = await run(tree);
+    expect(readJson(after, 'angular.json').projects.app.architect.build.configurations.production.security).toBeUndefined();
+    expect(warn).toContain('the "production" configuration');
+  });
+
+  it('is idempotent: the second run changes nothing and does not repeat the removal note', async () => {
+    const tree = await angular20();
+    editJson(tree, 'angular.json', (json) => ssr(json));
+    const first = await run(tree);
+    const second = await run(first.tree);
+    expect(second.tree.readText('angular.json')).toBe(first.tree.readText('angular.json'));
+    expect(second.tree.readText('package.json')).toBe(first.tree.readText('package.json'));
+    expect(second.warn).not.toContain('Removed security.allowedHosts');
+  });
+
+  it('refuses a list with hosts in it (an allow-list must not be dropped silently, and keeping it breaks the build): nothing is written', async () => {
+    const tree = await angular20();
+    editJson(tree, 'angular.json', (json) => ssr(json, { allowedHosts: ['shop.example.com'] }));
+    const before = { workspace: tree.readText('angular.json'), pkg: tree.readText('package.json') };
+    await expect(ngAdd(tree)).rejects.toThrow(
+      /security\.allowedHosts \(\["shop\.example\.com"\]\).*Schema validation failed.*drop your host allow-list.*--shaders prebuild.*NG_ALLOWED_HOSTS.*already installed/s,
+    );
+    expect(tree.readText('angular.json')).toBe(before.workspace);
+    expect(tree.readText('package.json')).toBe(before.pkg);
+  });
+
+  it('leaves the block alone on Angular 21 and 22 (their custom-esbuild schema knows it) and says nothing', async () => {
+    for (const [version, range] of [['21.0.0', '^21.2.0'], ['22.0.0', '^22.0.0']] as const) {
+      const tree = await workspaceWith(['app'], version);
+      editJson(tree, 'package.json', (pkg) => (pkg.dependencies['@angular/core'] = range));
+      editJson(tree, 'angular.json', (json) => ssr(json, { allowedHosts: ['a.example.com'] }));
+      const { tree: after, warn } = await run(tree);
+      expect(readJson(after, 'angular.json').projects.app.architect.build.options.security, version).toEqual({ allowedHosts: ['a.example.com'] });
+      expect(warn).not.toContain('allowedHosts');
+    }
+  });
+});
+
+describe('ng add: what it tells you at the end', () => {
+  it('tells a project that is already set up for the prebuild to restore the stock builders (running the prebuild again changes nothing)', async () => {
+    const prebuilt = await ours().runSchematic('ng-add', { shaders: 'prebuild' }, await workspaceWith());
+    const message = await ngAdd(prebuilt).then(
+      () => '',
+      (error: Error) => error.message,
+    );
+    expect(message).toMatch(/already set up for the shader prebuild.*first restore the stock builders in angular\.json.*@angular\/build:application.*then run ng add @typegpu-poc\/angular again/s);
+    expect(message).not.toMatch(/run `ng add \.\.\. --shaders prebuild` again/);
+  });
+
+  it('names the script that exists: check:shaders:<project> in a workspace with several applications', async () => {
+    const { info } = await run(await workspaceWith(['shop', 'admin']), { project: 'admin' });
+    expect(info).toContain('"npm run check:shaders:admin" fails by design');
+    expect(info).not.toContain('"npm run check:shaders" ');
+    expect((await run(await workspaceWith())).info).toContain('"npm run check:shaders" fails by design');
+  });
+
+  it('does not talk about a script that was not added or is the user\'s own', async () => {
+    const odd = await workspaceWith();
+    editJson(odd, 'angular.json', (json) => (json.projects.app.architect.build.options.outputPath = 'dist/a b'));
+    expect((await run(odd)).info).not.toContain('npm run');
+    const mine = await workspaceWith();
+    editJson(mine, 'package.json', (pkg) => (pkg.scripts['check:shaders'] = 'echo mine'));
+    expect((await run(mine)).info).not.toContain('fails by design');
+  });
+
+  const ssrApp = (json: Record<string, any>) => Object.assign(json.projects.app.architect.build.options, { server: 'src/main.server.ts', ssr: { entry: 'src/server.ts' } });
+
+  it('notes the default initial budget of an SSR application (once, as info) and never edits budgets', async () => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', ssrApp);
+    const budgets = readJson(tree, 'angular.json').projects.app.architect.build.configurations.production.budgets;
+    const { tree: after, info, warn } = await run(tree);
+    expect(info).toMatch(/SSR application.*500 kB.*ng add does not change your budgets.*"maximumWarning"/s);
+    expect(warn).not.toContain('500 kB');
+    expect(readJson(after, 'angular.json').projects.app.architect.build.configurations.production.budgets).toEqual(budgets);
+  });
+
+  it('says nothing about budgets for a browser-only application or one whose budget was changed', async () => {
+    expect((await run(await workspaceWith())).info).not.toContain('budget');
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => {
+      ssrApp(json);
+      json.projects.app.architect.build.configurations.production.budgets[0].maximumWarning = '700kB';
+    });
+    expect((await run(tree)).info).not.toContain('budget');
+  });
+
+  it('explains the stock `ng test` warning about the custom build target, only when there is a test target we configured', async () => {
+    const { info } = await run(await workspaceWith());
+    expect(info).toMatch(/`ng test` prints "The 'buildTarget' is configured to use '@angular-builders\/custom-esbuild:application', which is not supported" on every run.*harmless/s);
+    const noTest = await workspaceWith();
+    editJson(noTest, 'angular.json', (json) => delete json.projects.app.architect.test);
+    expect((await run(noTest)).info).not.toContain('`ng test` prints');
+    const karma = await workspaceWith();
+    editJson(karma, 'angular.json', (json) => (json.projects.app.architect.test = { builder: '@angular/build:karma', options: {} }));
+    expect((await run(karma)).info).not.toContain('`ng test` prints');
+  });
+
+  it('the prebuild mode adds one note about TS2307 for @shaders/... on a fresh clone', async () => {
+    const { info } = await run(await workspaceWith(), { shaders: 'prebuild' });
+    expect(info.match(/TS2307/g)).toHaveLength(1);
+    expect(info).toContain('npx typegpu-shaders build');
+  });
+});
+
+describe('ng add: files with Windows line endings (CRLF)', () => {
+  const crlf = (tree: Awaited<ReturnType<typeof workspaceWith>>, path: string) => tree.overwrite(path, tree.readText(path).replace(/\r?\n/g, '\r\n'));
+  const lone = (text: string) => /(^|[^\r])\n/.test(text);
+
+  it.each([['plugin', {}], ['prebuild', { shaders: 'prebuild' }]])('%s mode: angular.json, package.json and .gitignore stay CRLF throughout, indentation and unrelated lines are kept', async (_mode, options) => {
+    const tree = await workspaceWith();
+    editJson(tree, 'package.json', (pkg) => (pkg.files = ['dist', 'README.md']));
+    tree.overwrite('package.json', tree.readText('package.json').replace('"files": [\n    "dist",\n    "README.md"\n  ]', '"files": ["dist", "README.md"]'));
+    expect(tree.readText('package.json')).toContain('"files": ["dist", "README.md"]');
+    tree.overwrite('.gitignore', '/node_modules\n/dist\n');
+    for (const file of ['angular.json', 'package.json', '.gitignore']) crlf(tree, file);
+
+    const after = (await run(tree, options)).tree;
+    for (const file of ['angular.json', 'package.json', '.gitignore']) {
+      const text = after.readText(file);
+      expect(lone(text), `${file} has a lone LF`).toBe(false);
+      expect(text, file).toContain('\r\n');
+    }
+    expect(after.readText('package.json')).toContain('"files": ["dist", "README.md"]'); // not reformatted
+    expect(after.readText('package.json')).toMatch(/^\{\r\n {2}"/);
+    expect(readJson(after, 'package.json').dependencies.typegpu).toBe('^0.12.8');
+    if (!options.shaders) expect(readJson(after, 'package.json').scripts['check:shaders']).toContain('check-shader-bundle');
+    expect(readJson(after, 'angular.json').projects.app.architect.build.builder).toContain(options.shaders ? 'typegpu-poc' : 'custom-esbuild');
+  });
+
+  it('is byte-identical on the second run', async () => {
+    const tree = await workspaceWith();
+    for (const file of ['angular.json', 'package.json']) crlf(tree, file);
+    const first = (await run(tree)).tree;
+    const snapshot = { workspace: first.readText('angular.json'), pkg: first.readText('package.json') };
+    const second = (await run(first)).tree;
+    expect(second.readText('angular.json')).toBe(snapshot.workspace);
+    expect(second.readText('package.json')).toBe(snapshot.pkg);
+  });
+
+  it('does not turn LF files into CRLF', async () => {
+    const after = (await run(await workspaceWith())).tree;
+    expect(after.readText('angular.json')).not.toContain('\r');
+    expect(after.readText('package.json')).not.toContain('\r');
+  });
+
+  it('keeps tab indentation and a missing final newline in package.json', async () => {
+    const tree = await workspaceWith();
+    const pkg = readJson(tree, 'package.json');
+    tree.overwrite('package.json', JSON.stringify(pkg, null, '\t'));
+    const text = (await run(tree)).tree.readText('package.json');
+    expect(text).toMatch(/^\{\n\t"/);
+    expect(text.endsWith('\n')).toBe(false);
+    expect(text).toContain('\t\t"check:shaders": ');
+  });
+});
+
+describe('ng add: output folders of the check script', () => {
+  const script = async (edit: (json: Record<string, any>) => void) => {
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', edit);
+    return readJson(await ngAdd(tree), 'package.json').scripts['check:shaders'] as string | undefined;
+  };
+
+  it('follows ./ and trailing slashes of a string outputPath', async () => {
+    expect(await script((json) => (json.projects.app.architect.build.options.outputPath = './out/site/'))).toMatch(/ \.\/out\/site\/browser$/);
+  });
+
+  it('follows the outputPath of the production configuration, which the script builds with', async () => {
+    const value = await script((json) => (json.projects.app.architect.build.configurations.production.outputPath = { base: 'release', browser: 'web' }));
+    expect(value).toMatch(/--configuration production && node \S+ release\/web$/);
+  });
+
+  it('adds no script (and says so) for an absolute path or a Windows backslash path', async () => {
+    expect(await script((json) => (json.projects.app.architect.build.options.outputPath = '/var/www/app'))).toMatch(/ \/var\/www\/app\/browser$/);
+    expect(await script((json) => (json.projects.app.architect.build.options.outputPath = 'dist\\app'))).toBeUndefined();
+  });
+});
+
+describe('ng add: a workspace without an application', () => {
+  it('names what its projects are instead of just saying there is no application', async () => {
+    const tree = await workspaceWith(['shop']);
+    editJson(tree, 'angular.json', (json) => (json.projects.shop.projectType = 'library'));
+    await expect(ngAdd(tree)).rejects.toThrow(/no application project.*not applications: shop.*"projectType" must be "application"/s);
+    await expect(ngAdd(tree, { project: 'shop' })).rejects.toThrow(/Project "shop" is not an application/);
+  });
+});
