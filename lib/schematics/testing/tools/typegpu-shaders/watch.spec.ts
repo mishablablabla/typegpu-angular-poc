@@ -203,7 +203,7 @@ describe('watch', () => {
     await nextBuild(() => project.write('src/wave.gpu.ts', SHADER.replace('std.sin(x) * SCALE', 'std.cos(x) * SCALE')));
     expect(project.exists('shaders-dist/model.js')).toBe(true);
     // esbuild rewrites the files it is given; what matters is that the folder was never emptied in between (it is read by a running dev server)
-    expect(statSync(project.path('shaders-dist/model.js')).mtimeMs).toBeGreaterThanOrEqual(before);
+    expect(statSync(project.path('shaders-dist/model.js')).mtimeMs).toBe(before); // untouched: the same bytes are never rewritten
   });
 });
 
@@ -354,10 +354,14 @@ describe('watch: closing', () => {
     let printed = '';
     child.stdout.on('data', (chunk) => (printed += chunk));
     await waitFor(() => printed.includes('stub written'), 'the watcher in the child process');
-    const ended = new Promise<string | null>((resolve) => child.on('exit', (_code, signal) => resolve(signal)));
-    child.kill('SIGINT');
-    expect(await ended).toBe('SIGINT');
-    expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false);
+    try {
+      const ended = new Promise<string | null>((resolve) => child.on('exit', (_code, signal) => resolve(signal)));
+      child.kill('SIGINT');
+      expect(await ended).toBe('SIGINT');
+      expect(project.exists('shaders-dist/wave.gpu.js')).toBe(false);
+    } finally {
+      child.kill('SIGKILL'); // a failing assertion must not leave the child (and its esbuild service) running
+    }
   });
 
   // What is and is not shown here: the child's handler for the signal (registered by the watcher) runs, removes the stub and ends the

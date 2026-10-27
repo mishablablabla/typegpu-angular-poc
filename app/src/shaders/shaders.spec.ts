@@ -19,16 +19,20 @@ const HINT =
 const hasMetadata = (fn: object) =>
   (globalThis as { __TYPEGPU_META__?: WeakMap<object, unknown> }).__TYPEGPU_META__?.has(fn) === true;
 
+// Read at load time, before any test: `tgpu.resolve` (a later test) removes the metadata entry of a function it resolves, so reading it inside a
+// test depended on the order of the tests (a shuffled run failed the tripwire although nothing was wrong).
+const transformedAtLoad = new Map<object, boolean>([wave, waveViaAlias, waveViaJsSpecifier].map((fn) => [fn, hasMetadata(fn)]));
+
 describe('`*.gpu.ts` shader modules', () => {
   it('were transformed by the build plugin', () => {
-    if (!hasMetadata(wave)) throw new Error(HINT);
+    if (!transformedAtLoad.get(wave)) throw new Error(HINT);
   });
 
   it('are transformed however they are imported, and are one module', () => {
     // A tsconfig `paths` alias and a `./x.gpu.js` specifier must be transformed too, and a file imported through
     // two specifiers must stay one module (not bundled twice, one copy untransformed).
     for (const imported of [waveViaAlias, waveViaJsSpecifier]) {
-      if (!hasMetadata(imported)) throw new Error(HINT);
+      if (!transformedAtLoad.get(imported)) throw new Error(HINT);
       expect(imported).toBe(wave);
     }
   });

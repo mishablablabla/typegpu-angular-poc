@@ -44,7 +44,8 @@ function installFakeAngularBuild(exportsToSkip: string[] = []) {
   mkdirSync(join(modules, '@angular'), { recursive: true });
   const lib = join(__dirname, '..', '..', '..', 'node_modules');
   for (const entry of readdirSync(lib)) if (entry !== '@angular' && !entry.startsWith('.')) link(join(lib, entry), join(modules, entry));
-  for (const entry of readdirSync(join(lib, '@angular'))) link(join(lib, '@angular', entry), join(modules, '@angular', entry));
+  // never `build`: it is written into below, and through a link that would overwrite a real @angular/build installed in lib/node_modules
+  for (const entry of readdirSync(join(lib, '@angular'))) if (entry !== 'build') link(join(lib, '@angular', entry), join(modules, '@angular', entry));
   const build = join(modules, '@angular', 'build');
   for (const name of ['application', 'dev-server', 'unit-test', 'karma', 'extract-i18n']) {
     mkdirSync(join(build, 'src', 'builders', name), { recursive: true });

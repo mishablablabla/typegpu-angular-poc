@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    // real-fs.spec.ts changes the working directory, which a worker thread cannot do
+    pool: 'forks',
     include: ['schematics/**/*.spec.ts'],
     // creates the private temporary folder, and fails the run when a spec leaves a folder of ours in it
     globalSetup: ['schematics/testing/global-setup.ts'],

@@ -55,6 +55,15 @@ describe('ng add in an npm-workspaces layout (app in packages/web, dependencies 
     expect(existsSync(join(web, script.split(' ')[6]!))).toBe(true);
   });
 
+  it('drops a stale entry that is listed next to the real path, instead of adding the real path again', async () => {
+    const stale = `node_modules/@typegpu-poc/angular/${PLUGIN_FILE}`; // a path that no longer exists once the dependencies are hoisted
+    const tree = await workspaceWith();
+    editJson(tree, 'angular.json', (json) => (json.projects.app.architect.build.options.plugins = [stale, HOISTED]));
+    writeFileSync(join(web, 'angular.json'), tree.readText('angular.json'));
+    process.chdir(web);
+    expect(plugins(await ngAdd(tree))).toEqual([HOISTED]);
+  });
+
   it('works from a subfolder of the workspace, like the CLI', async () => {
     mkdirSync(join(web, 'src', 'app'), { recursive: true });
     const after = await ngAdd(await workspaceOnDisk(join(web, 'src', 'app')));

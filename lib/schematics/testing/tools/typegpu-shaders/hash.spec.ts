@@ -7,6 +7,8 @@ import { computeClosure } from '../../../../tools/typegpu-shaders/graph.mjs';
 // @ts-expect-error plain ES module without types
 import { computeHash } from '../../../../tools/typegpu-shaders/manifest.mjs';
 // @ts-expect-error plain ES module without types
+import { versionsOf } from '../../../../tools/typegpu-shaders/deps.mjs';
+// @ts-expect-error plain ES module without types
 import { watchShaders } from '../../../../tools/typegpu-shaders/index.mjs';
 import { createProject, SHADER, type Project } from './project';
 
@@ -15,6 +17,14 @@ beforeEach(() => {
   project = createProject();
 });
 afterEach(() => project.dispose());
+
+describe('the version part of the key is fed by what is installed (the key tests above pass their own versions)', () => {
+  it('versionsOf reads the installed versions and a digest of the tool code', () => {
+    const versions = versionsOf(project.root) as Record<string, string | undefined>;
+    for (const key of ['typegpu', 'unplugin', 'esbuild', 'typescript', 'babel']) expect(versions[key], key).toMatch(/^\d+\.\d+\.\d+/);
+    expect(versions['tool']).toMatch(/\+[0-9a-f]{16}$/);
+  });
+});
 
 const VERSIONS = { tool: 'tool@1', typegpu: '0.12.8', unplugin: '0.12.6', esbuild: '0.28.2', typescript: '6.0.3', babel: '7.29.7' };
 const hashOf = (versions = VERSIONS, mutate?: (config: Record<string, unknown>) => void) => {
