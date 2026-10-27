@@ -1,0 +1,102 @@
+name: QA matrix (temporary, plugin vs prebuild)
+
+# Temporary workflow for an investigation (see docs/plugin-qa/): it runs the scenario matrix harness against both shader modes from one packed
+# tarball on Linux x64 and Windows. It lives only on the branch qa/plugin-matrix-ci, runs only on a push to that branch, has read-only permissions,
+# no secrets, no deployment, and publishes nothing. Delete the branch when the investigation is finished.
+on:
+  push:
+    branches: ['qa/plugin-matrix-ci']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NG_CLI_ANALYTICS: 'false'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  pack:
+    name: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+        working-directory: lib
+      - run: npm run pack
+        working-directory: lib
+      - run: node scripts/verify-package.mjs lib/typegpu-poc-angular-*.tgz --print-integrity > lib/integrity.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lib-tarball
+          path: |
+            lib/typegpu-poc-angular-*.tgz
+            lib/integrity.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  matrix:
+    name: matrix (${{ matrix.os }}, ${{ matrix.mode }}, Angular ${{ matrix.angular }})
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        mode: [plugin, prebuild]
+        angular: ['22']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lib-tarball
+          path: lib
+      - name: Environment
+        run: |
+          node --version; npm --version; uname -a || true
+          echo "runner.os=${{ runner.os }} arch=${{ runner.arch }}"
+      - name: Matrix (S24 browser and S21 upgrade are not part of this run)
+        env:
+          WORK: ${{ runner.os == 'Windows' && 'C:/w' || format('{0}/w', runner.temp) }}
+        run: |
+          mkdir -p "$WORK"
+          TGZ="$(node -p "require('path').resolve(process.argv[1])" "$(ls lib/typegpu-poc-angular-*.tgz)")"
+          node docs/plugin-qa/matrix/harness/matrix.mjs --mode ${{ matrix.mode }} --angular ${{ matrix.angular }} \
+            --tgz "$TGZ" --work "$WORK" --out "$WORK/results.jsonl" \
+            --only S01,S02,S03,S04,S05,S06,S07,S08,S09,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19,S20,S22,S23 2>&1 | tee "$WORK/run.log"
+      - name: Summary
+        if: always()
+        env:
+          WORK: ${{ runner.os == 'Windows' && 'C:/w' || format('{0}/w', runner.temp) }}
+        run: node docs/plugin-qa/matrix/ci-summary.mjs "$WORK/results.jsonl" "${{ matrix.os }} ${{ matrix.mode }} Angular ${{ matrix.angular }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Results and evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: matrix-${{ matrix.os }}-${{ matrix.mode }}-a${{ matrix.angular }}
+          path: |
+            ${{ runner.os == 'Windows' && 'C:/w/results.jsonl' || format('{0}/w/results.jsonl', runner.temp) }}
+            ${{ runner.os == 'Windows' && 'C:/w/results.meta.json' || format('{0}/w/results.meta.json', runner.temp) }}
+            ${{ runner.os == 'Windows' && 'C:/w/run.log' || format('{0}/w/run.log', runner.temp) }}
+          if-no-files-found: warn
+          retention-days: 14
